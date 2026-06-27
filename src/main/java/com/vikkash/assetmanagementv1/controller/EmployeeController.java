@@ -51,7 +51,11 @@ public class EmployeeController {
                                                     @Valid @RequestBody EmployeeUpdateRequest request) {
         return ResponseEntity.ok(employeeService.updateEmployee(id, request));
     }
-
+    @PutMapping("/api/admin/employees/{employeeId}/test-reset")
+public ResponseEntity<String> testReset(@PathVariable String employeeId) {
+    employeeService.resetToDefaultPassword(employeeId);
+    return ResponseEntity.ok("Password reset");
+    }
     @DeleteMapping("/api/admin/employees/{id}")
     public ResponseEntity<String> deleteEmployee(@PathVariable Long id) {
         employeeService.deleteEmployee(id);
