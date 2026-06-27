@@ -2,6 +2,7 @@ package com.vikkash.assetmanagementv1.controller;
 
 import com.vikkash.assetmanagementv1.dto.EmployeeCreateRequest;
 import com.vikkash.assetmanagementv1.dto.EmployeeUpdateRequest;
+import com.vikkash.assetmanagementv1.entity.Asset;
 import com.vikkash.assetmanagementv1.entity.Employee;
 import com.vikkash.assetmanagementv1.service.EmployeeService;
 import jakarta.validation.Valid;
@@ -21,13 +22,22 @@ import java.util.List;
  *
  * REMOVED from this controller to eliminate routing conflicts:
  *   - GET /api/employee/{employeeId}/profile  (now only in EmployeeSelfController)
- *   - GET /api/employee/{employeeId}/assets   (now only in EmployeeSelfController)
+ *   - GET /api/employee/{employeeId}/assets   (now only in EmployeeSelfController, self-only)
  * Spring was ambiguously matching /api/employee/profile against
  * /api/employee/{employeeId}/profile — removing the path-variable variants here
  * eliminates that ambiguity.
+ *
+ * GET /api/admin/employees/{employeeId}/assets below is intentionally a
+ * *different* path prefix (/api/admin/** rather than /api/employee/**), so
+ * it does not reintroduce that ambiguity. It exists because admins need to
+ * look up *any* employee's assigned assets (e.g. the directory's expand-row
+ * view), whereas EmployeeSelfController's /api/employee/assets always
+ * resolves to the caller's own JWT identity by design and has no path
+ * variable to target another employee.
+ *
+ * CORS is handled centrally by SecurityConfig.corsConfigurationSource().
  */
 @RestController
-@CrossOrigin(origins = "http://localhost:3000")
 public class EmployeeController {
 
     private final EmployeeService employeeService;
@@ -51,11 +61,7 @@ public class EmployeeController {
                                                     @Valid @RequestBody EmployeeUpdateRequest request) {
         return ResponseEntity.ok(employeeService.updateEmployee(id, request));
     }
-    @PutMapping("/api/admin/employees/{employeeId}/test-reset")
-    public ResponseEntity<String> testReset(@PathVariable String employeeId) {
-        employeeService.resetToDefaultPassword(employeeId);
-        return ResponseEntity.ok("Password reset");
-    }
+
     @DeleteMapping("/api/admin/employees/{id}")
     public ResponseEntity<String> deleteEmployee(@PathVariable Long id) {
         employeeService.deleteEmployee(id);
@@ -66,6 +72,15 @@ public class EmployeeController {
     public ResponseEntity<String> resetPassword(@PathVariable String employeeId) {
         employeeService.resetToDefaultPassword(employeeId);
         return ResponseEntity.ok("Password reset to organization default. Employee must change it on next login.");
+    }
 
+    /**
+     * GET /api/admin/employees/{employeeId}/assets
+     * Admin-only lookup of any employee's assigned assets by employeeId
+     * (e.g. EMP001), used by the directory's expand-row view.
+     */
+    @GetMapping("/api/admin/employees/{employeeId}/assets")
+    public List<Asset> getEmployeeAssets(@PathVariable String employeeId) {
+        return employeeService.getAssetsForEmployee(employeeId);
     }
 }

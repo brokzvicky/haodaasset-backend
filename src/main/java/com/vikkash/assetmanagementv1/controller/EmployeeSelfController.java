@@ -29,9 +29,9 @@ import java.util.Map;
  * The JWT subject is the employeeId (set in AuthController at login time).
  * We never trust the client to send their own employeeId; we always read it
  * from the verified JWT subject stored in the SecurityContext.
+ * CORS is handled centrally by SecurityConfig.corsConfigurationSource().
  */
 @RestController
-@CrossOrigin(origins = "http://localhost:3000")
 @RequestMapping("/api/employee")
 public class EmployeeSelfController {
 

@@ -1,0 +1,22 @@
+# ==========================================================
+# LOCAL DEVELOPMENT TEMPLATE
+# ==========================================================
+# Copy this file to `application-local.properties` (already gitignored)
+# and fill in real values, OR export these as actual environment variables
+# before running the app. Either way, application.properties itself stays
+# free of secrets.
+#
+# To activate this profile when running locally:
+#   mvn spring-boot:run -Dspring-boot.run.profiles=local
+# or
+#   java -jar app.jar --spring.profiles.active=local
+#
+# ----------------------------------------------------------
+
+DB_URL=jdbc:postgresql://localhost:5432/asset_management
+DB_USERNAME=postgres
+DB_PASSWORD=changeme
+
+# Generate your own secret, e.g.:  openssl rand -base64 48
+JWT_SECRET=replace-this-with-a-real-random-256-bit-secret-before-running
+JWT_EXPIRATION_MS=86400000

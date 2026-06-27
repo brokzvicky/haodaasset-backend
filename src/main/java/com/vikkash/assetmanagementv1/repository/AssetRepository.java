@@ -2,7 +2,6 @@ package com.vikkash.assetmanagementv1.repository;
 
 import com.vikkash.assetmanagementv1.entity.Asset;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -22,11 +21,4 @@ public interface AssetRepository extends JpaRepository<Asset, Long> {
 
     // ── Serial number uniqueness check (used before saving) ───────────────
     boolean existsBySerialNumber(String serialNumber);
-
-    /**
-     * Used during assignment to verify the asset is currently Available
-     * without loading the full entity just for a status check.
-     */
-    @Query("SELECT a.assetStatus FROM Asset a WHERE a.assetId = :assetId")
-    Optional<String> findStatusById(Long assetId);
 }

@@ -20,9 +20,10 @@ import java.util.List;
  * EmployeeSelfController under /api/employee/**, keeping concerns separate.
  * The duplicate employee-facing endpoints that previously existed here have
  * been removed to prevent routing conflicts and duplicated business logic.
+ *
+ * CORS is handled centrally by SecurityConfig.corsConfigurationSource().
  */
 @RestController
-@CrossOrigin(origins = "http://localhost:3000")
 public class AssetRequestController {
 
     private final AssetRequestRepository assetRequestRepository;

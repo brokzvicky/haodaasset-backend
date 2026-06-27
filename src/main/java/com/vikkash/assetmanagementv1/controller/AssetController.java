@@ -14,8 +14,12 @@ import java.util.Map;
  * REST controller for asset inventory management.
  * Requires ROLE_ADMIN (enforced in SecurityConfig for /assets/**).
  * All business logic is delegated to AssetService.
+ *
+ * CORS is handled centrally by SecurityConfig.corsConfigurationSource() so
+ * that both the local dev origin and the deployed frontend origin are
+ * honored consistently — a controller-level @CrossOrigin here would
+ * override/conflict with that and silently break CORS for one of them.
  */
-@CrossOrigin(origins = "http://localhost:3000")
 @RestController
 @RequestMapping("/assets")
 public class AssetController {
