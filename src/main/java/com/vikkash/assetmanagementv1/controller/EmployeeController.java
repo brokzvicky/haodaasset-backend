@@ -45,7 +45,17 @@ public class EmployeeController {
     public ResponseEntity<Employee> createEmployee(@Valid @RequestBody EmployeeCreateRequest request) {
         return ResponseEntity.status(201).body(employeeService.createEmployee(request));
     }
+    @PutMapping("/reset-all-passwords")
+    public ResponseEntity<String> resetAllPasswords() {
 
+    employeeService.getAllEmployees().forEach(emp -> {
+        emp.setPassword(new BCryptPasswordEncoder().encode("Haoda@321"));
+        emp.setMustChangePassword(false);
+        employeeRepository.save(emp);
+    });
+
+    return ResponseEntity.ok("All passwords reset successfully");
+}
     @PutMapping("/api/admin/employees/{id}")
     public ResponseEntity<Employee> updateEmployee(@PathVariable Long id,
                                                     @Valid @RequestBody EmployeeUpdateRequest request) {
