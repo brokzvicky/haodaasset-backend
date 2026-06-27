@@ -45,16 +45,16 @@ public class EmployeeController {
     public ResponseEntity<Employee> createEmployee(@Valid @RequestBody EmployeeCreateRequest request) {
         return ResponseEntity.status(201).body(employeeService.createEmployee(request));
     }
-    
+
     @PutMapping("/api/admin/employees/{id}")
     public ResponseEntity<Employee> updateEmployee(@PathVariable Long id,
                                                     @Valid @RequestBody EmployeeUpdateRequest request) {
         return ResponseEntity.ok(employeeService.updateEmployee(id, request));
     }
     @PutMapping("/api/admin/employees/{employeeId}/test-reset")
-public ResponseEntity<String> testReset(@PathVariable String employeeId) {
-    employeeService.resetToDefaultPassword(employeeId);
-    return ResponseEntity.ok("Password reset");
+    public ResponseEntity<String> testReset(@PathVariable String employeeId) {
+        employeeService.resetToDefaultPassword(employeeId);
+        return ResponseEntity.ok("Password reset");
     }
     @DeleteMapping("/api/admin/employees/{id}")
     public ResponseEntity<String> deleteEmployee(@PathVariable Long id) {
@@ -66,5 +66,6 @@ public ResponseEntity<String> testReset(@PathVariable String employeeId) {
     public ResponseEntity<String> resetPassword(@PathVariable String employeeId) {
         employeeService.resetToDefaultPassword(employeeId);
         return ResponseEntity.ok("Password reset to organization default. Employee must change it on next login.");
+
     }
 }

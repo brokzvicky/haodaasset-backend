@@ -46,32 +46,32 @@ public class EmployeeService {
 
     // ── Authentication ─────────────────────────────────────────────────────
 
-   @Transactional(readOnly = true)
+    @Transactional(readOnly = true)
     public LoginResponse login(EmployeeLoginRequest request) {
 
-    String empId = request.getEmployeeId().trim().toUpperCase();
+        String empId = request.getEmployeeId().trim().toUpperCase();
 
-    log.info("Login attempt for {}", empId);
+        log.info("Login attempt for {}", empId);
 
-    Employee employee = employeeRepository.findByEmployeeId(empId)
-            .orElseThrow(() -> {
-                log.error("Employee NOT FOUND: {}", empId);
-                return new InvalidCredentialsException("Invalid Employee ID or password");
-            });
+        Employee employee = employeeRepository.findByEmployeeId(empId)
+                .orElseThrow(() -> {
+                    log.error("Employee NOT FOUND: {}", empId);
+                    return new InvalidCredentialsException("Invalid Employee ID or password");
+                });
 
-    log.info("Employee found: {}", employee.getEmployeeId());
+        log.info("Employee found: {}", employee.getEmployeeId());
 
-    boolean match = passwordEncoder.matches(request.getPassword(), employee.getPassword());
+        boolean match = passwordEncoder.matches(request.getPassword(), employee.getPassword());
 
-    log.info("Password match = {}", match);
+        log.info("Password match = {}", match);
 
-    if (!match) {
-        throw new InvalidCredentialsException("Invalid Employee ID or password");
-    }
+        if (!match) {
+            throw new InvalidCredentialsException("Invalid Employee ID or password");
+        }
 
-    String token = jwtUtil.generateToken(employee.getEmployeeId(), "EMPLOYEE");
+        String token = jwtUtil.generateToken(employee.getEmployeeId(), "EMPLOYEE");
 
-    return LoginResponse.forEmployee(token, employee);
+        return LoginResponse.forEmployee(token, employee);
     }
 
     @Transactional
