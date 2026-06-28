@@ -20,3 +20,7 @@ DB_PASSWORD=changeme
 # Generate your own secret, e.g.:  openssl rand -base64 48
 JWT_SECRET=replace-this-with-a-real-random-256-bit-secret-before-running
 JWT_EXPIRATION_MS=86400000
+
+# Generate your own secret, e.g.:  openssl rand -base64 48
+# (use a DIFFERENT value than JWT_SECRET — these protect different things)
+CREDENTIAL_ENCRYPTION_SECRET=replace-this-with-a-real-random-secret-before-running

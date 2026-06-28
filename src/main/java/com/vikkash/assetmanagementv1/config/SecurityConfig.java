@@ -45,6 +45,7 @@ public class SecurityConfig {
                 // ── Admin only ──
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 .requestMatchers("/assets/**").hasRole("ADMIN")
+                .requestMatchers("/api/network/**").hasRole("ADMIN")
 
                 // ── Employee self-service + admin can also call these ──
                 .requestMatchers("/api/employee/**").hasAnyRole("EMPLOYEE", "ADMIN")
