@@ -62,9 +62,8 @@ public class SecurityConfig {
         CorsConfiguration cfg = new CorsConfiguration();
         cfg.setAllowedOrigins(List.of(
                 "http://localhost:3000",
-                "https://haodaasset.netlify.app"
+                "https://haodaasset.netlify.app",
                 "https://haodaasset.in"
-
         ));
 
         cfg.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
