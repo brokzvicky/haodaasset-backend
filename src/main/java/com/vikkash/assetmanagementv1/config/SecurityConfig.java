@@ -64,6 +64,7 @@ public class SecurityConfig {
         cfg.setAllowedOrigins(List.of(
                 "http://localhost:3000",
                 "https://haodaasset.netlify.app",
+                "https://haodaasset.vercel.app",
                 "https://haodaasset.in/dashboard",
                 "https://haodaasset.in/assets",
                 "https://haodaasset.in/employees",
