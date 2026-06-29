@@ -63,17 +63,10 @@ public class SecurityConfig {
         CorsConfiguration cfg = new CorsConfiguration();
         cfg.setAllowedOrigins(List.of(
                 "http://localhost:3000",
-                "https://haodaasset.netlify.app",
                 "https://haodaasset.vercel.app",
-                "https://haodaasset.in/dashboard",
-                "https://haodaasset.in/assets",
-                "https://haodaasset.in/employees",
-                "https://haodaasset.in/asset-requests",
-                "https://haodaasset.in/network-credentials",
-                "https://haodaasset.in/reports",
-                "https://haodaasset.in"
+                "https://haodaasset.in",
+                "https://www.haodaasset.in"
         ));
-
         cfg.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         cfg.setAllowedHeaders(List.of("*"));
         cfg.setAllowCredentials(true);
