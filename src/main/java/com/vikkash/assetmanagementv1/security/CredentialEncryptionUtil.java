@@ -30,9 +30,12 @@ public class CredentialEncryptionUtil {
 
     @PostConstruct
     public void init() {
-        System.out.println("====================================");
-        System.out.println("Encryption Secret = " + configuredSecret);
-        System.out.println("====================================");
+        if (configuredSecret == null || configuredSecret.isBlank()) {
+            throw new IllegalStateException(
+                    "app.encryption.secret (CREDENTIAL_ENCRYPTION_SECRET) is not configured.");
+        }
+        // Log presence/length only — never the secret value itself.
+        System.out.println("Credential encryption secret loaded (" + configuredSecret.length() + " chars).");
     }
 
     private SecretKeySpec keySpec() {

@@ -25,7 +25,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InvalidCredentialsException.class)
     public ResponseEntity<ApiError> handleInvalidCredentials(InvalidCredentialsException ex,
-                                                              HttpServletRequest req) {
+                                                             HttpServletRequest req) {
         // Don't log at WARN/ERROR — wrong credentials are an expected user event, not a system failure
         log.debug("Auth failure at {}: {}", req.getRequestURI(), ex.getMessage());
         return build(HttpStatus.UNAUTHORIZED, "Unauthorized", ex.getMessage(), req);
@@ -61,12 +61,26 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.BAD_REQUEST, "Bad Request", ex.getMessage(), req);
     }
 
+    /**
+     * Covers encryption/decryption failures (CredentialEncryptionUtil), and any
+     * other "this object is in an invalid state to complete this operation"
+     * failure. Logged at ERROR with the full stack trace so the real cause
+     * (e.g. AEADBadTagException from a corrupted/mismatched ciphertext) is
+     * visible server-side, while the client only sees a safe generic message.
+     */
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ApiError> handleIllegalState(IllegalStateException ex, HttpServletRequest req) {
+        log.error("Illegal state at {}: {}", req.getRequestURI(), ex.getMessage(), ex);
+        return build(HttpStatus.INTERNAL_SERVER_ERROR, "Internal Server Error",
+                "Unable to process this credential. Please contact an administrator.", req);
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiError> handleValidation(MethodArgumentNotValidException ex,
-                                                      HttpServletRequest req) {
+                                                     HttpServletRequest req) {
         Map<String, String> fieldErrors = new HashMap<>();
         ex.getBindingResult().getFieldErrors()
-          .forEach(fe -> fieldErrors.put(fe.getField(), fe.getDefaultMessage()));
+                .forEach(fe -> fieldErrors.put(fe.getField(), fe.getDefaultMessage()));
 
         ApiError body = new ApiError(
                 HttpStatus.BAD_REQUEST.value(), "Validation Failed",
@@ -94,7 +108,7 @@ public class GlobalExceptionHandler {
     }
 
     private ResponseEntity<ApiError> build(HttpStatus status, String error,
-                                            String message, HttpServletRequest req) {
+                                           String message, HttpServletRequest req) {
         ApiError body = new ApiError(status.value(), error, message, req.getRequestURI());
         return ResponseEntity.status(status).body(body);
     }

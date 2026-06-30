@@ -16,15 +16,24 @@ import java.time.LocalDateTime;
  * on an explicit, audited "reveal" request. They must never be exposed via
  * the standard list/get responses — see NetworkCredentialResponse, which
  * deliberately omits them.
+ *
+ * IMPORTANT: These String fields are intentionally NOT annotated with
+ * @Lob. On Hibernate 6 (Spring Boot 3), @Lob on a String routes through a
+ * streamed CLOB binding instead of a plain varchar/text binding, which can
+ * fail to round-trip byte-exact data through PostgreSQL via HikariCP —
+ * corrupting Base64 ciphertext silently on write and breaking AES-GCM
+ * decryption on every read. Plain `text` columns (no @Lob) round-trip
+ * correctly and have no practical length limit in PostgreSQL, so @Lob is
+ * unnecessary here.
  */
 @Entity
 @Table(
-    name = "network_credentials",
-    indexes = {
-        @Index(name = "idx_netcred_device_type", columnList = "deviceType"),
-        @Index(name = "idx_netcred_location",    columnList = "location"),
-        @Index(name = "idx_netcred_ip_address",  columnList = "ipAddress")
-    }
+        name = "network_credentials",
+        indexes = {
+                @Index(name = "idx_netcred_device_type", columnList = "deviceType"),
+                @Index(name = "idx_netcred_location",    columnList = "location"),
+                @Index(name = "idx_netcred_ip_address",  columnList = "ipAddress")
+        }
 )
 public class NetworkCredential {
 
@@ -48,11 +57,10 @@ public class NetworkCredential {
     private String username;
 
     // AES ciphertext (Base64), never plaintext. See class-level note.
-    @Lob
+    // No @Lob — see class-level note for why.
     @Column(name = "encrypted_password", columnDefinition = "TEXT")
     private String encryptedPassword;
 
-    @Lob
     @Column(name = "encrypted_enable_password", columnDefinition = "TEXT")
     private String encryptedEnablePassword;
 
@@ -63,7 +71,6 @@ public class NetworkCredential {
     private String vlan;
     private String isp;
 
-    @Lob
     @Column(columnDefinition = "TEXT")
     private String notes;
 
