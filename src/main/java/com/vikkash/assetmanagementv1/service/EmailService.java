@@ -1,29 +1,39 @@
 package com.vikkash.assetmanagementv1.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.vikkash.assetmanagementv1.exception.EmailDeliveryException;
-import jakarta.mail.MessagingException;
-import jakarta.mail.internet.MimeMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.MailException;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
-
-import java.io.UnsupportedEncodingException;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestTemplate;
 
 /**
- * Sends transactional security emails (OTP codes) over the SMTP
- * configuration in application.properties. Reused by both the Admin
- * Forgot Password flow and the Network Credential unlock flow.
+ * Sends transactional security emails (OTP codes) via the Brevo
+ * Transactional Email REST API (HTTPS, port 443) instead of SMTP.
+ * SMTP is intentionally not used here because outbound SMTP ports
+ * (25/465/587) are blocked on Render's network, which previously
+ * caused SocketTimeoutException failures.
+ *
+ * Reused by both the Admin Forgot Password flow and the Network
+ * Credential unlock flow.
  */
 @Service
 public class EmailService {
 
     private static final Logger log = LoggerFactory.getLogger(EmailService.class);
 
-    private final JavaMailSender mailSender;
+    private static final String BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
+
+    private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
 
     @Value("${app.mail.from}")
     private String fromAddress;
@@ -31,8 +41,12 @@ public class EmailService {
     @Value("${app.mail.from-name}")
     private String fromName;
 
-    public EmailService(JavaMailSender mailSender) {
-        this.mailSender = mailSender;
+    @Value("${app.brevo.api-key}")
+    private String brevoApiKey;
+
+    public EmailService(RestTemplate restTemplate, ObjectMapper objectMapper) {
+        this.restTemplate = restTemplate;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -45,19 +59,49 @@ public class EmailService {
      */
     public void sendOtpEmail(String to, String heading, String otp, long expiryMinutes) {
         try {
-            MimeMessage message = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, false, "UTF-8");
-            helper.setFrom(fromAddress, fromName);
-            helper.setTo(to);
-            helper.setSubject(heading + " — Your AssetTower verification code");
-            helper.setText(buildHtml(heading, otp, expiryMinutes), true);
-            mailSender.send(message);
-            log.info("OTP email sent: heading={} to={}", heading, maskEmail(to));
-        } catch (MessagingException | UnsupportedEncodingException | MailException ex) {
-            log.error("Failed to send OTP email to {}: {}", maskEmail(to), ex.getMessage());
+            ObjectNode root = objectMapper.createObjectNode();
+
+            ObjectNode sender = root.putObject("sender");
+            sender.put("name", fromName);
+            sender.put("email", fromAddress);
+
+            ObjectNode recipient = objectMapper.createObjectNode();
+            recipient.put("email", to);
+            root.putArray("to").add(recipient);
+
+            root.put("subject", heading + " — Your AssetTower verification code");
+            root.put("htmlContent", buildHtml(heading, otp, expiryMinutes));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("api-key", brevoApiKey);
+            headers.set("accept", "application/json");
+
+            HttpEntity<String> request = new HttpEntity<>(objectMapper.writeValueAsString(root), headers);
+
+            restTemplate.postForEntity(BREVO_API_URL, request, String.class);
+            log.info("OTP email sent via Brevo API: heading={} to={}", heading, maskEmail(to));
+        } catch (ResourceAccessException ex) {
+            log.error("Network error calling Brevo API for {}: {}", maskEmail(to), ex.getMessage());
+            throw new EmailDeliveryException(
+                    "Couldn't send the verification email right now. Please try again in a moment.", ex);
+        } catch (RestClientException ex) {
+            HttpStatusCode status = extractStatus(ex);
+            log.error("Brevo API rejected OTP email to {} (status={}): {}", maskEmail(to), status, ex.getMessage());
+            throw new EmailDeliveryException(
+                    "Couldn't send the verification email right now. Please try again in a moment.", ex);
+        } catch (Exception ex) {
+            log.error("Unexpected failure sending OTP email to {}: {}", maskEmail(to), ex.getMessage());
             throw new EmailDeliveryException(
                     "Couldn't send the verification email right now. Please try again in a moment.", ex);
         }
+    }
+
+    private HttpStatusCode extractStatus(RestClientException ex) {
+        if (ex instanceof org.springframework.web.client.HttpStatusCodeException httpEx) {
+            return httpEx.getStatusCode();
+        }
+        return null;
     }
 
     private String buildHtml(String heading, String otp, long expiryMinutes) {
