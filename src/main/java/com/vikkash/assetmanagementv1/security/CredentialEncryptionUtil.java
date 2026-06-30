@@ -1,5 +1,6 @@
 package com.vikkash.assetmanagementv1.security;
 
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -41,7 +42,12 @@ public class CredentialEncryptionUtil {
 
     @Value("${app.encryption.secret}")
     private String configuredSecret;
-
+    @PostConstruct
+    public void init() {
+        System.out.println("====================================");
+        System.out.println("Encryption Secret = " + configuredSecret);
+        System.out.println("====================================");
+    }
     private SecretKeySpec keySpec() {
         try {
             // Derive a fixed 256-bit key from the configured secret via SHA-256,
