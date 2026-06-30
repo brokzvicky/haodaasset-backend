@@ -1,9 +1,13 @@
 package com.vikkash.assetmanagementv1.controller;
 
+import com.vikkash.assetmanagementv1.dto.CredentialOtpVerifyRequest;
 import com.vikkash.assetmanagementv1.dto.NetworkCredentialCreateRequest;
 import com.vikkash.assetmanagementv1.dto.NetworkCredentialResponse;
 import com.vikkash.assetmanagementv1.dto.NetworkCredentialUpdateRequest;
+import com.vikkash.assetmanagementv1.dto.OtpRequestResponse;
 import com.vikkash.assetmanagementv1.dto.RevealedCredentialResponse;
+import com.vikkash.assetmanagementv1.dto.UnlockStatusResponse;
+import com.vikkash.assetmanagementv1.service.CredentialUnlockService;
 import com.vikkash.assetmanagementv1.service.NetworkCredentialService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -25,9 +29,11 @@ import java.util.Map;
 public class NetworkCredentialController {
 
     private final NetworkCredentialService service;
+    private final CredentialUnlockService unlockService;
 
-    public NetworkCredentialController(NetworkCredentialService service) {
+    public NetworkCredentialController(NetworkCredentialService service, CredentialUnlockService unlockService) {
         this.service = service;
+        this.unlockService = unlockService;
     }
 
     @GetMapping
@@ -71,18 +77,47 @@ public class NetworkCredentialController {
     }
 
     /**
-     * Decrypts and returns the device login password.
-     * Only ever called when an admin explicitly clicks "Show Password" for
-     * this specific row — the password never travels over the wire as part
-     * of any other response.
+     * Decrypts and returns the device login password. Requires an active
+     * credential-unlock window (see /credential-access/*) — never callable
+     * directly off a fresh login without a verified OTP.
      */
     @GetMapping("/{id}/reveal-password")
     public RevealedCredentialResponse revealPassword(@PathVariable Long id, Authentication authentication) {
+        unlockService.assertUnlocked(authentication.getName());
         return new RevealedCredentialResponse(service.revealPassword(id, authentication.getName()));
     }
 
     @GetMapping("/{id}/reveal-enable-password")
     public RevealedCredentialResponse revealEnablePassword(@PathVariable Long id, Authentication authentication) {
+        unlockService.assertUnlocked(authentication.getName());
         return new RevealedCredentialResponse(service.revealEnablePassword(id, authentication.getName()));
+    }
+
+    // ── Credential unlock (OTP gate for password / enable-password / copy actions) ──
+
+    /** Generates a fresh OTP and emails it to the logged-in admin's registered address. */
+    @PostMapping("/credential-access/request-otp")
+    public ResponseEntity<OtpRequestResponse> requestUnlockOtp(Authentication authentication) {
+        return ResponseEntity.ok(unlockService.requestOtp(authentication.getName()));
+    }
+
+    /** Verifies the OTP and, on success, opens the time-boxed unlock window. */
+    @PostMapping("/credential-access/verify-otp")
+    public ResponseEntity<UnlockStatusResponse> verifyUnlockOtp(@Valid @RequestBody CredentialOtpVerifyRequest request,
+                                                                  Authentication authentication) {
+        return ResponseEntity.ok(unlockService.verifyOtp(authentication.getName(), request.getOtp()));
+    }
+
+    /** Lets the UI poll/restore unlock state (e.g. after a page refresh) without re-sending an OTP. */
+    @GetMapping("/credential-access/status")
+    public ResponseEntity<UnlockStatusResponse> unlockStatus(Authentication authentication) {
+        return ResponseEntity.ok(unlockService.status(authentication.getName()));
+    }
+
+    /** Lets the UI explicitly re-lock (e.g. on tab close / manual "hide all") before the timer would. */
+    @PostMapping("/credential-access/lock")
+    public ResponseEntity<Map<String, String>> lock(Authentication authentication) {
+        unlockService.lock(authentication.getName());
+        return ResponseEntity.ok(Map.of("message", "Credentials locked."));
     }
 }

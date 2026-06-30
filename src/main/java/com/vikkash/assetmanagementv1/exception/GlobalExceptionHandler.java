@@ -43,6 +43,18 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.CONFLICT, "Conflict", ex.getMessage(), req);
     }
 
+    @ExceptionHandler(OtpException.class)
+    public ResponseEntity<ApiError> handleOtp(OtpException ex, HttpServletRequest req) {
+        log.debug("OTP failure at {}: {}", req.getRequestURI(), ex.getMessage());
+        return build(HttpStatus.BAD_REQUEST, "Bad Request", ex.getMessage(), req);
+    }
+
+    @ExceptionHandler(EmailDeliveryException.class)
+    public ResponseEntity<ApiError> handleEmailDelivery(EmailDeliveryException ex, HttpServletRequest req) {
+        log.error("Email delivery failure at {}: {}", req.getRequestURI(), ex.getMessage());
+        return build(HttpStatus.SERVICE_UNAVAILABLE, "Service Unavailable", ex.getMessage(), req);
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiError> handleIllegalArgument(IllegalArgumentException ex, HttpServletRequest req) {
         log.debug("Bad request at {}: {}", req.getRequestURI(), ex.getMessage());

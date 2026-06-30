@@ -28,6 +28,9 @@ public class DataSeeder implements CommandLineRunner {
     private final EmployeeRepository employeeRepository;
     private final PasswordEncoder    passwordEncoder;
 
+    @org.springframework.beans.factory.annotation.Value("${app.admin.recovery-email:}")
+    private String adminRecoveryEmail;
+
     public DataSeeder(AdminRepository adminRepository,
                       EmployeeRepository employeeRepository,
                       PasswordEncoder passwordEncoder) {
@@ -40,6 +43,7 @@ public class DataSeeder implements CommandLineRunner {
     @Transactional
     public void run(String... args) {
         seedAdmin();
+        backfillAdminEmail();
         seedEmployees();
     }
 
@@ -49,8 +53,30 @@ public class DataSeeder implements CommandLineRunner {
         Admin admin = new Admin();
         admin.setUsername("admin");
         admin.setPassword(passwordEncoder.encode("admin123"));
+        if (adminRecoveryEmail != null && !adminRecoveryEmail.isBlank()) {
+            admin.setEmail(adminRecoveryEmail.trim().toLowerCase());
+        }
         adminRepository.save(admin);
         log.info("Seeded default admin account (username=admin)");
+    }
+
+    /**
+     * Backfills a recovery email onto existing admin accounts that don't
+     * have one yet (e.g. deployments created before the Forgot Password
+     * feature existed). No-op if ADMIN_RECOVERY_EMAIL isn't configured or
+     * the admin already has an email on file.
+     */
+    private void backfillAdminEmail() {
+        if (adminRecoveryEmail == null || adminRecoveryEmail.isBlank()) return;
+        String normalized = adminRecoveryEmail.trim().toLowerCase();
+
+        adminRepository.findByUsername("admin").ifPresent(admin -> {
+            if (admin.getEmail() == null || admin.getEmail().isBlank()) {
+                admin.setEmail(normalized);
+                adminRepository.save(admin);
+                log.info("Backfilled recovery email for admin account from ADMIN_RECOVERY_EMAIL");
+            }
+        });
     }
 
     private void seedEmployees() {

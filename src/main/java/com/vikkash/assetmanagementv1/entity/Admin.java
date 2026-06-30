@@ -17,6 +17,15 @@ public class Admin {
     @Column(nullable = false)
     private String password;
 
+    /**
+     * Registered recovery email used for Forgot Password OTPs and
+     * Network Credential unlock OTPs. Nullable at the DB level so the
+     * column can be added to existing deployments without breaking
+     * current rows (enforced as required by the service layer instead).
+     */
+    @Column(unique = true, length = 150)
+    private String email;
+
     public Admin() {
     }
 
@@ -47,5 +56,13 @@ public class Admin {
 
     public void setPassword(String password) {
         this.password = password;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
     }
 }
