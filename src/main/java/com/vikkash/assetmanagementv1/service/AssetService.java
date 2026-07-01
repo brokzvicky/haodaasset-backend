@@ -135,7 +135,11 @@ public class AssetService {
             }
         }
 
-        asset.setEmployeeId(request.getEmployeeId());
+        asset.setEmployeeId(
+                request.getEmployeeId() != null && !request.getEmployeeId().isBlank()
+                        ? request.getEmployeeId().trim().toUpperCase()
+                        : null
+        );
         asset.setEmployeeName(request.getEmployeeName());
         asset.setEmployeeRole(request.getEmployeeRole());
         asset.setLocation(request.getLocation() != null ? request.getLocation() : asset.getLocation());
