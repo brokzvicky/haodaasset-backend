@@ -68,6 +68,11 @@ public class Asset {
 
     private String remarks;
 
+    // ── Hardware specification fields ──────────────────────────────────────
+    private String processor;
+    private String ram;
+    private String storage;
+
     // ── Assignment / return tracking ───────────────────────────────────────
     private String assignedDate;
     private String returnedStatus;
@@ -130,6 +135,15 @@ public class Asset {
 
     public String getRemarks() { return remarks; }
     public void setRemarks(String remarks) { this.remarks = remarks; }
+
+    public String getProcessor() { return processor; }
+    public void setProcessor(String processor) { this.processor = processor; }
+
+    public String getRam() { return ram; }
+    public void setRam(String ram) { this.ram = ram; }
+
+    public String getStorage() { return storage; }
+    public void setStorage(String storage) { this.storage = storage; }
 
     public String getAssignedDate() { return assignedDate; }
     public void setAssignedDate(String assignedDate) { this.assignedDate = assignedDate; }
