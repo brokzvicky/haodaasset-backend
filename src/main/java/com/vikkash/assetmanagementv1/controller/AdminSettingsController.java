@@ -5,7 +5,6 @@ import com.vikkash.assetmanagementv1.dto.OtpRequestResponse;
 import com.vikkash.assetmanagementv1.service.AdminService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -26,47 +25,36 @@ public class AdminSettingsController {
 
     /**
      * POST /api/admin/change-password/request-otp
-     *
-     * Step 1: Admin submits current + new password.
-     * Verifies current password is correct, then sends OTP to admin email.
-     *
      * Body: { "currentPassword": "...", "newPassword": "..." }
      */
     @PostMapping("/change-password/request-otp")
     public ResponseEntity<OtpRequestResponse> requestOtp(
-            @AuthenticationPrincipal UserDetails userDetails,
+            @AuthenticationPrincipal String username,
             @RequestBody Map<String, String> body) {
 
-        String username       = userDetails.getUsername();
-        String currentPassword = body.get("currentPassword");
-        String newPassword     = body.get("newPassword");
-
-        OtpRequestResponse response =
-                adminService.requestChangePasswordOtp(username, currentPassword, newPassword);
-
+        OtpRequestResponse response = adminService.requestChangePasswordOtp(
+                username,
+                body.get("currentPassword"),
+                body.get("newPassword")
+        );
         return ResponseEntity.ok(response);
     }
 
     /**
      * POST /api/admin/change-password/confirm
-     *
-     * Step 2: Admin submits the OTP received by email.
-     * Verifies OTP and saves the new BCrypt-hashed password.
-     *
      * Body: { "currentPassword": "...", "newPassword": "...", "otp": "123456" }
      */
     @PostMapping("/change-password/confirm")
     public ResponseEntity<MessageResponse> confirmChange(
-            @AuthenticationPrincipal UserDetails userDetails,
+            @AuthenticationPrincipal String username,
             @RequestBody Map<String, String> body) {
 
-        String username        = userDetails.getUsername();
-        String currentPassword = body.get("currentPassword");
-        String newPassword     = body.get("newPassword");
-        String otp             = body.get("otp");
-
-        adminService.changePassword(username, currentPassword, newPassword, otp);
-
+        adminService.changePassword(
+                username,
+                body.get("currentPassword"),
+                body.get("newPassword"),
+                body.get("otp")
+        );
         return ResponseEntity.ok(new MessageResponse("Password changed successfully."));
     }
 }
