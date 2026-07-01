@@ -114,7 +114,7 @@ public class AdminService {
         if (newPassword == null || newPassword.length() < 8) {
             throw new IllegalArgumentException("New password must be at least 8 characters.");
         }
-        if (!admin.getEmail().isBlank()) {
+        if (admin.getEmail() != null && !admin.getEmail().isBlank()) {
             String key = PW_CHANGE_NAMESPACE + admin.getUsername();
             String otp = otpService.generate(key);
             emailService.sendOtpEmail(admin.getEmail(), "Admin Password Change", otp, otpService.expiryMinutes());
