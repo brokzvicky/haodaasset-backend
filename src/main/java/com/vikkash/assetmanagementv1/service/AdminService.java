@@ -25,6 +25,9 @@ public class AdminService {
     /** Namespace prefix so password-reset OTP keys never collide with other OTP purposes. */
     private static final String PW_RESET_NAMESPACE = "pwreset:";
 
+    /** Separate namespace for the authenticated change-password flow in Settings. */
+    private static final String PW_CHANGE_NAMESPACE = "pwchange:";
+
     private final AdminRepository adminRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
@@ -90,6 +93,56 @@ public class AdminService {
         admin.setPassword(passwordEncoder.encode(newPassword));
         adminRepository.save(admin);
         log.info("Password reset completed for admin id={}", admin.getId());
+    }
+
+    // ── Authenticated Change Password (Settings page) ────────────────────
+
+    /**
+     * Step 1: admin is already logged in. They submit their current password
+     * and desired new password. We verify the current password is correct,
+     * then send an OTP to their registered email before actually saving.
+     */
+    @Transactional(readOnly = true)
+    public OtpRequestResponse requestChangePasswordOtp(String username, String currentPassword,
+                                                        String newPassword) {
+        Admin admin = adminRepository.findByUsername(username.trim())
+                .orElseThrow(() -> new InvalidCredentialsException("Admin account not found."));
+
+        if (!passwordEncoder.matches(currentPassword, admin.getPassword())) {
+            throw new InvalidCredentialsException("Current password is incorrect.");
+        }
+        if (newPassword == null || newPassword.length() < 8) {
+            throw new IllegalArgumentException("New password must be at least 8 characters.");
+        }
+        if (!admin.getEmail().isBlank()) {
+            String key = PW_CHANGE_NAMESPACE + admin.getUsername();
+            String otp = otpService.generate(key);
+            emailService.sendOtpEmail(admin.getEmail(), "Admin Password Change", otp, otpService.expiryMinutes());
+            log.info("Change-password OTP sent to admin id={}", admin.getId());
+            return new OtpRequestResponse(
+                    "A verification code has been sent to " + admin.getEmail() + ". Enter it below to confirm the change.",
+                    otpService.expiryMinutes() * 60,
+                    otpService.secondsUntilResendAllowed(key));
+        }
+        throw new OtpException("No email address is registered for this admin account. Please contact support.");
+    }
+
+    /**
+     * Step 2: admin submits the OTP. On success the new password is saved.
+     */
+    @Transactional
+    public void changePassword(String username, String currentPassword,
+                               String newPassword, String otp) {
+        Admin admin = adminRepository.findByUsername(username.trim())
+                .orElseThrow(() -> new InvalidCredentialsException("Admin account not found."));
+
+        if (!passwordEncoder.matches(currentPassword, admin.getPassword())) {
+            throw new InvalidCredentialsException("Current password is incorrect.");
+        }
+        otpService.verify(PW_CHANGE_NAMESPACE + admin.getUsername(), otp);
+        admin.setPassword(passwordEncoder.encode(newPassword));
+        adminRepository.save(admin);
+        log.info("Password changed via Settings for admin id={}", admin.getId());
     }
 
     private Admin getByEmailOrThrow(String email) {
