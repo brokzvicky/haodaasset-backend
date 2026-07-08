@@ -5,7 +5,16 @@ import jakarta.validation.constraints.NotBlank;
 
 /** Used by PUT /api/admin/employees/{id} to edit an existing employee's profile fields (not password). */
 public class EmployeeUpdateRequest {
+    @NotBlank(message = "Employee ID is required")
+    private String employeeId;
 
+    public String getEmployeeId() {
+        return employeeId;
+    }
+
+    public void setEmployeeId(String employeeId) {
+        this.employeeId = employeeId;
+    }
     @NotBlank(message = "Employee name is required")
     private String employeeName;
 
@@ -57,4 +66,5 @@ public class EmployeeUpdateRequest {
     public void setLocation(String location) {
         this.location = location;
     }
+
 }

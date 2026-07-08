@@ -145,7 +145,7 @@ public class EmployeeService {
                 && employeeRepository.existsByEmail(request.getEmail())) {
             throw new DuplicateResourceException("Email already in use: " + request.getEmail());
         }
-
+        employee.setEmployeeId(request.getEmployeeId().trim().toUpperCase());
         employee.setEmployeeName(request.getEmployeeName());
         employee.setEmail(request.getEmail());
         employee.setDepartment(request.getDepartment());
