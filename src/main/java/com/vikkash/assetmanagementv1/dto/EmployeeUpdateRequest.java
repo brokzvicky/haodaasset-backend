@@ -63,6 +63,8 @@ public class EmployeeUpdateRequest {
         return location;
     }
 
+    private String employeeId;
+
     public void setLocation(String location) {
         this.location = location;
     }
