@@ -145,14 +145,45 @@ public class EmployeeService {
                 && employeeRepository.existsByEmail(request.getEmail())) {
             throw new DuplicateResourceException("Email already in use: " + request.getEmail());
         }
-        employee.setEmployeeId(request.getEmployeeId().trim().toUpperCase());
+
+        String oldEmployeeId = employee.getEmployeeId(); // capture BEFORE overwriting
+        String newEmployeeId = request.getEmployeeId().trim().toUpperCase();
+
+        // Guard against renaming into an ID that's already taken by someone else.
+        if (!newEmployeeId.equalsIgnoreCase(oldEmployeeId)
+                && employeeRepository.existsByEmployeeId(newEmployeeId)) {
+            throw new DuplicateResourceException("Employee ID already in use: " + newEmployeeId);
+        }
+
+        employee.setEmployeeId(newEmployeeId);
         employee.setEmployeeName(request.getEmployeeName());
         employee.setEmail(request.getEmail());
         employee.setDepartment(request.getDepartment());
         employee.setDesignation(request.getDesignation());
         employee.setLocation(request.getLocation());
 
-        return employeeRepository.save(employee);
+        Employee saved = employeeRepository.save(employee);
+
+        // CASCADE: if the employeeId actually changed, every asset that was
+        // linked to the OLD id must be repointed at the NEW one — otherwise
+        // those assets silently orphan (they'll still show the employee's
+        // name on the Assets page, but vanish from that employee's "View
+        // Assets" panel, since that lookup matches strictly on employeeId).
+        if (oldEmployeeId != null && !oldEmployeeId.isBlank()
+                && !newEmployeeId.equalsIgnoreCase(oldEmployeeId)) {
+            List<Asset> ownedAssets = assetRepository.findByEmployeeId(oldEmployeeId);
+            for (Asset asset : ownedAssets) {
+                asset.setEmployeeId(newEmployeeId);
+                asset.setEmployeeName(saved.getEmployeeName()); // keep display name in sync too
+            }
+            if (!ownedAssets.isEmpty()) {
+                assetRepository.saveAll(ownedAssets);
+                log.info("Employee ID changed {} -> {}: relinked {} asset(s) to the new ID.",
+                        oldEmployeeId, newEmployeeId, ownedAssets.size());
+            }
+        }
+
+        return saved;
     }
 
     @Transactional
