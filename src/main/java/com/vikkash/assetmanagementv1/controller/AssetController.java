@@ -1,12 +1,16 @@
 package com.vikkash.assetmanagementv1.controller;
 
+import com.vikkash.assetmanagementv1.dto.AssetEmailLogResponse;
 import com.vikkash.assetmanagementv1.dto.AssignAssetRequest;
 import com.vikkash.assetmanagementv1.dto.OrphanedAssetDTO;
 import com.vikkash.assetmanagementv1.dto.RepairResultDTO;
+import com.vikkash.assetmanagementv1.dto.SendAssetEmailResponse;
 import com.vikkash.assetmanagementv1.entity.Asset;
+import com.vikkash.assetmanagementv1.service.AssetEmailService;
 import com.vikkash.assetmanagementv1.service.AssetService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -27,9 +31,11 @@ import java.util.Map;
 public class AssetController {
 
     private final AssetService assetService;
+    private final AssetEmailService assetEmailService;
 
-    public AssetController(AssetService assetService) {
+    public AssetController(AssetService assetService, AssetEmailService assetEmailService) {
         this.assetService = assetService;
+        this.assetEmailService = assetEmailService;
     }
 
     @GetMapping
@@ -111,5 +117,24 @@ public class AssetController {
     public ResponseEntity<Map<String, String>> deleteAsset(@PathVariable Long id) {
         assetService.deleteAsset(id);
         return ResponseEntity.ok(Map.of("message", "Asset deleted successfully"));
+    }
+
+    /**
+     * Sends the "Asset Assignment" notification email for this asset.
+     * Also used for "Resend" from the Email Logs page — sending is idempotent
+     * from the caller's point of view; each call just adds a new log row.
+     * The admin identity is taken from the JWT subject, never from the request body.
+     */
+    @PostMapping("/send-email/{id}")
+    public ResponseEntity<SendAssetEmailResponse> sendAssignmentEmail(@PathVariable Long id,
+                                                                       Authentication authentication) {
+        String sentBy = authentication != null ? authentication.getName() : "unknown";
+        Asset updated = assetEmailService.sendAssignmentEmail(id, sentBy);
+        return ResponseEntity.ok(new SendAssetEmailResponse(updated, "Asset assignment email sent successfully."));
+    }
+
+    @GetMapping("/email-logs")
+    public List<AssetEmailLogResponse> getEmailLogs() {
+        return assetEmailService.getEmailLogs();
     }
 }

@@ -156,6 +156,8 @@ public class AssetService {
         // Clear any previous return tracking on reassignment
         asset.setReturnedStatus(null);
         asset.setReturnDate(null);
+        // New assignment ⇒ no assignment email has gone out for it yet
+        asset.setEmailStatus("Not Sent");
 
         log.info("Asset {} assigned to employee {}", id, request.getEmployeeName());
         return assetRepository.save(asset);
@@ -384,6 +386,7 @@ public class AssetService {
         asset.setEmployeeName(null);
         asset.setEmployeeRole(null);
         asset.setAssignedDate(null);
+        asset.setEmailStatus("Not Sent");
 
         log.info("Asset {} returned. New status: {}", id, nextStatus);
         return assetRepository.save(asset);

@@ -51,6 +51,16 @@ public class Asset {
     @Column(name = "asset_status")
     private String assetStatus = "Available";
 
+    /**
+     * Tracks whether the "Asset Assignment" notification email has been sent
+     * for the current assignment. One of: "Not Sent", "Sent", "Failed".
+     * Reset to "Not Sent" whenever the asset is (re)assigned or returned so a
+     * stale status from a previous assignment never carries over.
+     */
+    @Column(name = "email_status")
+    private String emailStatus = "Not Sent";
+
+
     @Column(name = "asset_condition")
     private String assetCondition = "New";
 
@@ -117,6 +127,9 @@ public class Asset {
 
     public String getAssetStatus() { return assetStatus; }
     public void setAssetStatus(String assetStatus) { this.assetStatus = assetStatus; }
+
+    public String getEmailStatus() { return emailStatus; }
+    public void setEmailStatus(String emailStatus) { this.emailStatus = emailStatus; }
 
     public String getAssetCondition() { return assetCondition; }
     public void setAssetCondition(String assetCondition) { this.assetCondition = assetCondition; }
