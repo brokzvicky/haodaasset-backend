@@ -1,6 +1,8 @@
 package com.vikkash.assetmanagementv1.controller;
 
 import com.vikkash.assetmanagementv1.dto.AssignAssetRequest;
+import com.vikkash.assetmanagementv1.dto.OrphanedAssetDTO;
+import com.vikkash.assetmanagementv1.dto.RepairResultDTO;
 import com.vikkash.assetmanagementv1.entity.Asset;
 import com.vikkash.assetmanagementv1.service.AssetService;
 import jakarta.validation.Valid;
@@ -33,6 +35,29 @@ public class AssetController {
     @GetMapping
     public List<Asset> getAllAssets() {
         return assetService.getAllAssets();
+    }
+
+    /**
+     * Diagnostic, read-only: lists every "Assigned" asset whose employeeId
+     * link is broken (missing, or pointing at an employeeId that doesn't
+     * exist). These are the assets that show a name on this page but won't
+     * show up under that employee's "View Assets" panel on the Employees
+     * page. Makes no data changes — just a report to find them.
+     */
+    @GetMapping("/orphaned-assignments")
+    public List<OrphanedAssetDTO> getOrphanedAssignments() {
+        return assetService.findOrphanedAssignments();
+    }
+
+    /**
+     * Repairs every asset found by getOrphanedAssignments(): clears its
+     * broken assignment fields and resets it to Available, so it can be
+     * correctly re-assigned via the normal Assign Asset flow. Does not
+     * guess or auto-assign an employee. Returns a summary of what changed.
+     */
+    @PutMapping("/repair-orphaned-assignments")
+    public List<RepairResultDTO> repairOrphanedAssignments() {
+        return assetService.repairOrphanedAssignments();
     }
 
     @GetMapping("/available")

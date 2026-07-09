@@ -1,6 +1,8 @@
 package com.vikkash.assetmanagementv1.service;
 
 import com.vikkash.assetmanagementv1.dto.AssignAssetRequest;
+import com.vikkash.assetmanagementv1.dto.OrphanedAssetDTO;
+import com.vikkash.assetmanagementv1.dto.RepairResultDTO;
 import com.vikkash.assetmanagementv1.entity.Asset;
 import com.vikkash.assetmanagementv1.exception.DuplicateResourceException;
 import com.vikkash.assetmanagementv1.exception.ResourceNotFoundException;
@@ -13,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -158,7 +161,122 @@ public class AssetService {
         return assetRepository.save(asset);
     }
 
+    /**
+     * Diagnostic (read-only) scan: finds every asset whose assetStatus is
+     * "Assigned" but whose employeeId link is broken — either missing, or
+     * pointing at an employeeId that doesn't exist in the employee table.
+     *
+     * These are exactly the assets that will show a name in the Asset
+     * Inventory list (via the free-text employeeName field) but will NOT
+     * show up under that employee's "View Assets" panel, because that panel
+     * looks the asset up strictly by employeeId
+     * (see EmployeeService.getAssetsForEmployee).
+     *
+     * This method makes no changes — it only reports. Fixing an entry means
+     * re-assigning that asset to the correct employee through the normal
+     * "Assign Asset" flow so a valid employeeId gets written.
+     */
+    @Transactional(readOnly = true)
+    public List<OrphanedAssetDTO> findOrphanedAssignments() {
+        List<Asset> assignedAssets = assetRepository.findByAssetStatus("Assigned");
+        List<OrphanedAssetDTO> orphaned = new ArrayList<>();
+
+        for (Asset asset : assignedAssets) {
+            String empId = asset.getEmployeeId();
+
+            if (empId == null || empId.isBlank()) {
+                orphaned.add(new OrphanedAssetDTO(
+                        asset.getAssetId(),
+                        asset.getLaptopName(),
+                        asset.getSerialNumber(),
+                        asset.getEmployeeName(),
+                        empId,
+                        "EMPLOYEE_ID_MISSING"
+                ));
+                continue;
+            }
+
+            boolean employeeExists = employeeRepository.existsByEmployeeId(empId.trim().toUpperCase());
+            if (!employeeExists) {
+                orphaned.add(new OrphanedAssetDTO(
+                        asset.getAssetId(),
+                        asset.getLaptopName(),
+                        asset.getSerialNumber(),
+                        asset.getEmployeeName(),
+                        empId,
+                        "EMPLOYEE_ID_NOT_FOUND"
+                ));
+            }
+        }
+
+        log.info("findOrphanedAssignments: {} of {} assigned asset(s) have a broken employeeId link.",
+                orphaned.size(), assignedAssets.size());
+        return orphaned;
+    }
+
+    /**
+     * Repairs every orphaned assignment found by findOrphanedAssignments():
+     * for each affected asset, clears the (broken) assignment fields and
+     * resets assetStatus to "Available" — mirroring exactly what a normal
+     * returnAsset() does to those fields (see returnAsset() below), minus
+     * the returnedStatus/returnDate bookkeeping, since this was never a
+     * real return.
+     *
+     * This does NOT try to guess which employee an asset "should" belong
+     * to — it only undoes the broken link so the asset is free to be
+     * correctly re-assigned via the normal Assign Asset flow. Nothing is
+     * deleted; laptopName/serialNumber/condition/etc. are untouched.
+     */
+    @Transactional
+    public List<RepairResultDTO> repairOrphanedAssignments() {
+        List<Asset> assignedAssets = assetRepository.findByAssetStatus("Assigned");
+        List<RepairResultDTO> repaired = new ArrayList<>();
+
+        for (Asset asset : assignedAssets) {
+            String empId = asset.getEmployeeId();
+            String reason = null;
+
+            if (empId == null || empId.isBlank()) {
+                reason = "EMPLOYEE_ID_MISSING";
+            } else if (!employeeRepository.existsByEmployeeId(empId.trim().toUpperCase())) {
+                reason = "EMPLOYEE_ID_NOT_FOUND";
+            }
+
+            if (reason == null) {
+                continue; // this asset's assignment is valid, leave it alone
+            }
+
+            String previousEmployeeName = asset.getEmployeeName();
+            String previousEmployeeId = empId;
+
+            asset.setEmployeeId(null);
+            asset.setEmployeeName(null);
+            asset.setEmployeeRole(null);
+            asset.setAssignedDate(null);
+            asset.setAssetStatus("Available");
+            assetRepository.save(asset);
+
+            repaired.add(new RepairResultDTO(
+                    asset.getAssetId(),
+                    asset.getLaptopName(),
+                    asset.getSerialNumber(),
+                    previousEmployeeName,
+                    previousEmployeeId,
+                    reason,
+                    "Available"
+            ));
+
+            log.info("Repaired orphaned assignment on asset {} (was '{}', employeeId='{}', reason={}). Status reset to Available.",
+                    asset.getAssetId(), previousEmployeeName, previousEmployeeId, reason);
+        }
+
+        log.info("repairOrphanedAssignments: repaired {} of {} assigned asset(s).",
+                repaired.size(), assignedAssets.size());
+        return repaired;
+    }
+
     // ── Update ─────────────────────────────────────────────────────────────
+
 
     /**
      * Updates only the non‑null fields of the asset.
