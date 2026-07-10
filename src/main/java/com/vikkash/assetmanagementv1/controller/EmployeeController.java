@@ -1,9 +1,11 @@
 package com.vikkash.assetmanagementv1.controller;
 
 import com.vikkash.assetmanagementv1.dto.EmployeeCreateRequest;
+import com.vikkash.assetmanagementv1.dto.EmployeeSearchResponse;
 import com.vikkash.assetmanagementv1.dto.EmployeeUpdateRequest;
 import com.vikkash.assetmanagementv1.entity.Asset;
 import com.vikkash.assetmanagementv1.entity.Employee;
+import com.vikkash.assetmanagementv1.service.EmployeeAssetEmailService;
 import com.vikkash.assetmanagementv1.service.EmployeeService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -41,14 +43,26 @@ import java.util.List;
 public class EmployeeController {
 
     private final EmployeeService employeeService;
+    private final EmployeeAssetEmailService employeeAssetEmailService;
 
-    public EmployeeController(EmployeeService employeeService) {
+    public EmployeeController(EmployeeService employeeService, EmployeeAssetEmailService employeeAssetEmailService) {
         this.employeeService = employeeService;
+        this.employeeAssetEmailService = employeeAssetEmailService;
     }
 
     @GetMapping("/api/admin/employees")
     public List<Employee> getAllEmployees() {
         return employeeService.getAllEmployees();
+    }
+
+    /**
+     * Used by the "Send Asset Email" page's search box. Matches on
+     * Employee ID, Employee Name, or Email. Returns an empty list for a
+     * blank/missing query rather than the whole directory.
+     */
+    @GetMapping("/api/admin/employees/search")
+    public List<EmployeeSearchResponse> searchEmployees(@RequestParam(name = "q", required = false, defaultValue = "") String q) {
+        return employeeAssetEmailService.searchEmployees(q);
     }
 
     @PostMapping("/api/admin/employees")
