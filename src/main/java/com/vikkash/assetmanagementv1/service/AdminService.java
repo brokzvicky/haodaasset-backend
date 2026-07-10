@@ -48,7 +48,7 @@ public class AdminService {
      * visibility/control over every admin sign-in — regardless of which
      * admin account is logging in.
      */
-    @Value("${app.admin.2fa-email:itsupport@haodapeyments.com}")
+    @Value("${app.admin.2fa-email:itsupport@haodapayments.com}")
     private String twoFactorEmail;
 
     public AdminService(AdminRepository adminRepository, PasswordEncoder passwordEncoder, JwtUtil jwtUtil,
