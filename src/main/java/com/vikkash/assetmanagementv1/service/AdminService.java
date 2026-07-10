@@ -1,6 +1,7 @@
 package com.vikkash.assetmanagementv1.service;
 
 import com.vikkash.assetmanagementv1.dto.AdminLoginRequest;
+import com.vikkash.assetmanagementv1.dto.AdminLoginResponse;
 import com.vikkash.assetmanagementv1.dto.LoginResponse;
 import com.vikkash.assetmanagementv1.dto.OtpRequestResponse;
 import com.vikkash.assetmanagementv1.entity.Admin;
@@ -11,6 +12,7 @@ import com.vikkash.assetmanagementv1.repository.AdminRepository;
 import com.vikkash.assetmanagementv1.security.JwtUtil;
 import com.vikkash.assetmanagementv1.security.OtpService;
 import com.vikkash.assetmanagementv1.security.PasswordResetTokenService;
+import com.vikkash.assetmanagementv1.security.TwoFactorTokenService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -28,26 +30,40 @@ public class AdminService {
     /** Separate namespace for the authenticated change-password flow in Settings. */
     private static final String PW_CHANGE_NAMESPACE = "pwchange:";
 
+    /** Separate namespace for the admin login 2FA OTP. */
+    private static final String LOGIN_2FA_NAMESPACE = "login2fa:";
+
     private final AdminRepository adminRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final OtpService otpService;
     private final EmailService emailService;
     private final PasswordResetTokenService resetTokenService;
+    private final TwoFactorTokenService twoFactorTokenService;
 
     public AdminService(AdminRepository adminRepository, PasswordEncoder passwordEncoder, JwtUtil jwtUtil,
                          OtpService otpService, EmailService emailService,
-                         PasswordResetTokenService resetTokenService) {
+                         PasswordResetTokenService resetTokenService,
+                         TwoFactorTokenService twoFactorTokenService) {
         this.adminRepository = adminRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
         this.otpService = otpService;
         this.emailService = emailService;
         this.resetTokenService = resetTokenService;
+        this.twoFactorTokenService = twoFactorTokenService;
     }
 
+    /**
+     * Step 1 of admin login: verifies username + password. If the admin has
+     * a recovery email on file, a 6-digit OTP is emailed to it and a
+     * challenge token is returned — the JWT is NOT issued yet (see
+     * {@link #verifyLoginOtp}). If no recovery email is on file, 2FA is
+     * skipped and a JWT is issued immediately, so accounts without an email
+     * configured are never locked out.
+     */
     @Transactional(readOnly = true)
-    public LoginResponse login(AdminLoginRequest request) {
+    public AdminLoginResponse login(AdminLoginRequest request) {
         Admin admin = adminRepository.findByUsername(request.getUsername().trim())
                 .orElseThrow(() -> new InvalidCredentialsException("Invalid username or password"));
 
@@ -55,10 +71,73 @@ public class AdminService {
             throw new InvalidCredentialsException("Invalid username or password");
         }
 
+        if (admin.getEmail() == null || admin.getEmail().isBlank()) {
+            log.info("Admin id={} has no recovery email on file — skipping 2FA", admin.getId());
+            return AdminLoginResponse.direct(issueLoginResponse(admin));
+        }
+
+        String key = LOGIN_2FA_NAMESPACE + admin.getUsername();
+        String otp = otpService.generate(key);
+        emailService.sendOtpEmail(admin.getEmail(), "Admin Login Verification", otp, otpService.expiryMinutes());
+        String challengeToken = twoFactorTokenService.issue(admin.getUsername());
+        log.info("2FA OTP sent for admin login id={}", admin.getId());
+
+        return AdminLoginResponse.challenge(
+                challengeToken,
+                "A verification code has been sent to " + maskEmail(admin.getEmail()) + ".",
+                maskEmail(admin.getEmail()),
+                otpService.expiryMinutes() * 60,
+                otpService.secondsUntilResendAllowed(key));
+    }
+
+    /**
+     * Step 2 of admin login: verifies the OTP against the challenge token
+     * from step 1 and, only on success, issues the real JWT. A wrong code
+     * does NOT invalidate the challenge token, so the admin can retry (up
+     * to OtpService's max-attempts) without restarting the whole login.
+     */
+    @Transactional(readOnly = true)
+    public LoginResponse verifyLoginOtp(String challengeToken, String otp) {
+        String username = twoFactorTokenService.peek(challengeToken);
+        Admin admin = adminRepository.findByUsername(username)
+                .orElseThrow(() -> new InvalidCredentialsException("Admin account not found."));
+
+        otpService.verify(LOGIN_2FA_NAMESPACE + admin.getUsername(), otp);
+        twoFactorTokenService.consume(challengeToken); // single-use once verification actually succeeds
+
+        log.info("2FA login completed for admin id={}", admin.getId());
+        return issueLoginResponse(admin);
+    }
+
+    /** Resends the login OTP for a pending 2FA challenge (subject to OtpService's resend cooldown). */
+    @Transactional(readOnly = true)
+    public OtpRequestResponse resendLoginOtp(String challengeToken) {
+        String username = twoFactorTokenService.peek(challengeToken);
+        Admin admin = adminRepository.findByUsername(username)
+                .orElseThrow(() -> new InvalidCredentialsException("Admin account not found."));
+
+        String key = LOGIN_2FA_NAMESPACE + admin.getUsername();
+        String otp = otpService.generate(key);
+        emailService.sendOtpEmail(admin.getEmail(), "Admin Login Verification", otp, otpService.expiryMinutes());
+        log.info("2FA OTP resent for admin login id={}", admin.getId());
+
+        return new OtpRequestResponse(
+                "A new verification code has been sent to " + maskEmail(admin.getEmail()) + ".",
+                otpService.expiryMinutes() * 60,
+                otpService.secondsUntilResendAllowed(key));
+    }
+
+    private LoginResponse issueLoginResponse(Admin admin) {
         String token = jwtUtil.generateToken(admin.getUsername(), "ADMIN");
         LoginResponse response = LoginResponse.forAdmin(token, admin.getUsername());
         response.setEmail(admin.getEmail());
         return response;
+    }
+
+    private static String maskEmail(String email) {
+        int at = email.indexOf('@');
+        if (at <= 1) return email;
+        return email.charAt(0) + "***" + email.substring(at);
     }
 
     // ── Forgot Password (Email OTP) ──────────────────────────────────────

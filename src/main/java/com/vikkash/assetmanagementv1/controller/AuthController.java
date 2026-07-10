@@ -1,14 +1,17 @@
 package com.vikkash.assetmanagementv1.controller;
 
 import com.vikkash.assetmanagementv1.dto.AdminLoginRequest;
+import com.vikkash.assetmanagementv1.dto.AdminLoginResponse;
 import com.vikkash.assetmanagementv1.dto.ChangePasswordRequest;
 import com.vikkash.assetmanagementv1.dto.EmployeeLoginRequest;
 import com.vikkash.assetmanagementv1.dto.ForgotPasswordRequest;
 import com.vikkash.assetmanagementv1.dto.LoginResponse;
 import com.vikkash.assetmanagementv1.dto.MessageResponse;
 import com.vikkash.assetmanagementv1.dto.OtpRequestResponse;
+import com.vikkash.assetmanagementv1.dto.ResendLoginOtpRequest;
 import com.vikkash.assetmanagementv1.dto.ResetOtpVerifyResponse;
 import com.vikkash.assetmanagementv1.dto.ResetPasswordRequest;
+import com.vikkash.assetmanagementv1.dto.VerifyLoginOtpRequest;
 import com.vikkash.assetmanagementv1.dto.VerifyResetOtpRequest;
 import com.vikkash.assetmanagementv1.service.AdminService;
 import com.vikkash.assetmanagementv1.service.EmployeeService;
@@ -32,9 +35,27 @@ public class AuthController {
         this.employeeService = employeeService;
     }
 
+    /**
+     * Step 1 of admin login (username + password). If the admin has a
+     * recovery email on file this returns a 2FA challenge rather than a
+     * token — see {@link #verifyLoginOtp}. Otherwise it returns a ready
+     * token directly.
+     */
     @PostMapping("/admin/login")
-    public ResponseEntity<LoginResponse> adminLogin(@Valid @RequestBody AdminLoginRequest request) {
+    public ResponseEntity<AdminLoginResponse> adminLogin(@Valid @RequestBody AdminLoginRequest request) {
         return ResponseEntity.ok(adminService.login(request));
+    }
+
+    /** Step 2 of admin login: verifies the emailed OTP and returns the real JWT. */
+    @PostMapping("/admin/verify-login-otp")
+    public ResponseEntity<LoginResponse> verifyLoginOtp(@Valid @RequestBody VerifyLoginOtpRequest request) {
+        return ResponseEntity.ok(adminService.verifyLoginOtp(request.getChallengeToken(), request.getOtp()));
+    }
+
+    /** Resends the login OTP for a pending 2FA challenge. */
+    @PostMapping("/admin/resend-login-otp")
+    public ResponseEntity<OtpRequestResponse> resendLoginOtp(@Valid @RequestBody ResendLoginOtpRequest request) {
+        return ResponseEntity.ok(adminService.resendLoginOtp(request.getChallengeToken()));
     }
 
     @PostMapping("/employee/login")
