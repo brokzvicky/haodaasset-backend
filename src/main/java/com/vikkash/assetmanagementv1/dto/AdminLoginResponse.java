@@ -7,12 +7,11 @@ package com.vikkash.assetmanagementv1.dto;
  *   - twoFactorRequired = true  → challengeToken/maskedEmail/expiresInSeconds/resendAfterSeconds
  *                                  are populated; the React app shows the OTP-entry step and
  *                                  must call /verify-login-otp to actually receive a JWT.
- *   - twoFactorRequired = false → login is populated with a ready-to-use JWT. This only
- *                                  happens when the admin account has no recovery email on
- *                                  file, since there'd be nowhere to send the OTP — logging
- *                                  in directly (rather than locking the account out) matches
- *                                  how this app already treats a missing recovery email
- *                                  elsewhere (see AdminService#requestChangePasswordOtp).
+ *                                  Currently this is always the case — every admin login OTP
+ *                                  is sent to the shared IT Support inbox (app.admin.2fa-email).
+ *   - twoFactorRequired = false → login is populated with a ready-to-use JWT. Reserved for a
+ *                                  future "skip 2FA" path (e.g. a trusted-device toggle); not
+ *                                  currently produced by AdminService.
  */
 public class AdminLoginResponse {
 

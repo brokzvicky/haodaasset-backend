@@ -15,6 +15,7 @@ import com.vikkash.assetmanagementv1.security.PasswordResetTokenService;
 import com.vikkash.assetmanagementv1.security.TwoFactorTokenService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,6 +42,15 @@ public class AdminService {
     private final PasswordResetTokenService resetTokenService;
     private final TwoFactorTokenService twoFactorTokenService;
 
+    /**
+     * Every admin login OTP is sent here rather than to the individual
+     * admin's personal recovery email, so the IT Support team has central
+     * visibility/control over every admin sign-in — regardless of which
+     * admin account is logging in.
+     */
+    @Value("${app.admin.2fa-email:itsupport@haodapeyments.com}")
+    private String twoFactorEmail;
+
     public AdminService(AdminRepository adminRepository, PasswordEncoder passwordEncoder, JwtUtil jwtUtil,
                          OtpService otpService, EmailService emailService,
                          PasswordResetTokenService resetTokenService,
@@ -55,12 +65,10 @@ public class AdminService {
     }
 
     /**
-     * Step 1 of admin login: verifies username + password. If the admin has
-     * a recovery email on file, a 6-digit OTP is emailed to it and a
-     * challenge token is returned — the JWT is NOT issued yet (see
-     * {@link #verifyLoginOtp}). If no recovery email is on file, 2FA is
-     * skipped and a JWT is issued immediately, so accounts without an email
-     * configured are never locked out.
+     * Step 1 of admin login: verifies username + password, then always
+     * sends the 2FA OTP to the shared IT Support inbox (app.admin.2fa-email)
+     * rather than the individual admin's personal email — the JWT is NOT
+     * issued yet (see {@link #verifyLoginOtp}).
      */
     @Transactional(readOnly = true)
     public AdminLoginResponse login(AdminLoginRequest request) {
@@ -71,21 +79,16 @@ public class AdminService {
             throw new InvalidCredentialsException("Invalid username or password");
         }
 
-        if (admin.getEmail() == null || admin.getEmail().isBlank()) {
-            log.info("Admin id={} has no recovery email on file — skipping 2FA", admin.getId());
-            return AdminLoginResponse.direct(issueLoginResponse(admin));
-        }
-
         String key = LOGIN_2FA_NAMESPACE + admin.getUsername();
         String otp = otpService.generate(key);
-        emailService.sendOtpEmail(admin.getEmail(), "Admin Login Verification", otp, otpService.expiryMinutes());
+        emailService.sendOtpEmail(twoFactorEmail, "Admin Login Verification", otp, otpService.expiryMinutes());
         String challengeToken = twoFactorTokenService.issue(admin.getUsername());
-        log.info("2FA OTP sent for admin login id={}", admin.getId());
+        log.info("2FA OTP sent to IT Support inbox for admin login id={}", admin.getId());
 
         return AdminLoginResponse.challenge(
                 challengeToken,
-                "A verification code has been sent to " + maskEmail(admin.getEmail()) + ".",
-                maskEmail(admin.getEmail()),
+                "A verification code has been sent to " + maskEmail(twoFactorEmail) + ".",
+                maskEmail(twoFactorEmail),
                 otpService.expiryMinutes() * 60,
                 otpService.secondsUntilResendAllowed(key));
     }
@@ -109,7 +112,7 @@ public class AdminService {
         return issueLoginResponse(admin);
     }
 
-    /** Resends the login OTP for a pending 2FA challenge (subject to OtpService's resend cooldown). */
+    /** Resends the login OTP (to the same IT Support inbox) for a pending 2FA challenge. */
     @Transactional(readOnly = true)
     public OtpRequestResponse resendLoginOtp(String challengeToken) {
         String username = twoFactorTokenService.peek(challengeToken);
@@ -118,11 +121,11 @@ public class AdminService {
 
         String key = LOGIN_2FA_NAMESPACE + admin.getUsername();
         String otp = otpService.generate(key);
-        emailService.sendOtpEmail(admin.getEmail(), "Admin Login Verification", otp, otpService.expiryMinutes());
-        log.info("2FA OTP resent for admin login id={}", admin.getId());
+        emailService.sendOtpEmail(twoFactorEmail, "Admin Login Verification", otp, otpService.expiryMinutes());
+        log.info("2FA OTP resent to IT Support inbox for admin login id={}", admin.getId());
 
         return new OtpRequestResponse(
-                "A new verification code has been sent to " + maskEmail(admin.getEmail()) + ".",
+                "A new verification code has been sent to " + maskEmail(twoFactorEmail) + ".",
                 otpService.expiryMinutes() * 60,
                 otpService.secondsUntilResendAllowed(key));
     }
