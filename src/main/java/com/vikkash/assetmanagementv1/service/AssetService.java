@@ -3,11 +3,9 @@ package com.vikkash.assetmanagementv1.service;
 import com.vikkash.assetmanagementv1.dto.AssignAssetRequest;
 import com.vikkash.assetmanagementv1.dto.OrphanedAssetDTO;
 import com.vikkash.assetmanagementv1.dto.RepairResultDTO;
-import com.vikkash.assetmanagementv1.entity.Admin;
 import com.vikkash.assetmanagementv1.entity.Asset;
 import com.vikkash.assetmanagementv1.exception.DuplicateResourceException;
 import com.vikkash.assetmanagementv1.exception.ResourceNotFoundException;
-import com.vikkash.assetmanagementv1.repository.AdminRepository;
 import com.vikkash.assetmanagementv1.repository.AssetRepository;
 import com.vikkash.assetmanagementv1.repository.AssetRequestRepository;
 import com.vikkash.assetmanagementv1.repository.EmployeeRepository;
@@ -21,7 +19,6 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 /**
  * All asset-related business logic lives here.
@@ -36,26 +33,23 @@ public class AssetService {
     private final EmployeeRepository     employeeRepository;
     private final AssetRequestRepository assetRequestRepository;
     private final AuditLogService        auditLogService;
-    private final AdminRepository        adminRepository;
     private final EmailService           emailService;
 
-    // Fallback admin address used for the automatic post-assignment
-    // notification when the assigning admin has no email on file
-    // (or the assignment was made without an admin context).
-    @Value("${app.admin.recovery-email:}")
-    private String fallbackAdminEmail;
+    // Fixed inbox that every "asset assigned" admin notification goes to,
+    // regardless of which admin performed the assignment — same pattern as
+    // app.admin.2fa-email (a shared IT Support inbox, not a personal address).
+    @Value("${app.admin.assignment-notification-email:itsupport@haodapayments.com}")
+    private String assignmentNotificationEmail;
 
     public AssetService(AssetRepository assetRepository,
                         EmployeeRepository employeeRepository,
                         AssetRequestRepository assetRequestRepository,
                         AuditLogService auditLogService,
-                        AdminRepository adminRepository,
                         EmailService emailService) {
         this.assetRepository        = assetRepository;
         this.employeeRepository     = employeeRepository;
         this.assetRequestRepository = assetRequestRepository;
         this.auditLogService        = auditLogService;
-        this.adminRepository        = adminRepository;
         this.emailService           = emailService;
     }
 
@@ -254,11 +248,10 @@ public class AssetService {
      * assignment itself, since the asset has already been assigned by this point.
      */
     private void notifyAdminOfAssignment(Asset saved, String assignedByAdmin) {
-        String recipient = resolveAdminEmail(assignedByAdmin);
+        String recipient = assignmentNotificationEmail;
         if (recipient == null || recipient.isBlank()) {
-            log.warn("No admin email available to notify for assignment of asset {} " +
-                    "(assignedByAdmin='{}'); configure app.admin.recovery-email as a fallback.",
-                    saved.getAssetId(), assignedByAdmin);
+            log.warn("No admin notification email configured for assignment of asset {}; " +
+                    "set app.admin.assignment-notification-email.", saved.getAssetId());
             return;
         }
 
@@ -291,17 +284,6 @@ public class AssetService {
             log.error("Failed to send asset assignment admin notification for asset {}: {}",
                     saved.getAssetId(), ex.getMessage());
         }
-    }
-
-    /** Prefers the assigning admin's own registered email; falls back to the shared recovery inbox. */
-    private String resolveAdminEmail(String adminUsername) {
-        if (adminUsername != null && !adminUsername.isBlank()) {
-            Optional<Admin> admin = adminRepository.findByUsername(adminUsername);
-            if (admin.isPresent() && admin.get().getEmail() != null && !admin.get().getEmail().isBlank()) {
-                return admin.get().getEmail();
-            }
-        }
-        return fallbackAdminEmail;
     }
 
     /**
