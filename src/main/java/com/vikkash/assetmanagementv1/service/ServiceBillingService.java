@@ -1,6 +1,7 @@
 package com.vikkash.assetmanagementv1.service;
 
 import com.vikkash.assetmanagementv1.entity.ServiceBilling;
+import com.vikkash.assetmanagementv1.exception.DuplicateResourceException;
 import com.vikkash.assetmanagementv1.exception.ResourceNotFoundException;
 import com.vikkash.assetmanagementv1.repository.ServiceBillingRepository;
 import org.slf4j.Logger;
@@ -63,6 +64,36 @@ public class ServiceBillingService {
                 .orElseThrow(() -> new ResourceNotFoundException("Service payment not found with id: " + id));
     }
 
+    /** Billing History for a service+vendor: every past billing period, latest first (Requirement 6). */
+    @Transactional(readOnly = true)
+    public List<ServiceBilling> getHistory(String service, String vendor) {
+        return repository.findByServiceIgnoreCaseAndVendorIgnoreCaseOrderByBillingFromDateDesc(
+                requireText(service, "Service"), requireText(vendor, "Vendor"));
+    }
+
+    /**
+     * Search/filter used by the list view and by PDF/Excel export
+     * (Requirement 9): by service, vendor, billing period (overlap with the
+     * given range), status, and payment date. Any parameter left null/blank
+     * is ignored.
+     */
+    @Transactional(readOnly = true)
+    public List<ServiceBilling> search(String service, String vendor, LocalDate periodFrom, LocalDate periodTo,
+                                        String status, LocalDate paymentDate) {
+        return repository.findAllByOrderByPaymentDateDesc().stream()
+                .filter(r -> service == null || service.isBlank() || equalsIgnoreCase(r.getService(), service))
+                .filter(r -> vendor == null || vendor.isBlank() || equalsIgnoreCase(r.getVendor(), vendor))
+                .filter(r -> periodFrom == null || (r.getBillingToDate() != null && !r.getBillingToDate().isBefore(periodFrom)))
+                .filter(r -> periodTo == null || (r.getBillingFromDate() != null && !r.getBillingFromDate().isAfter(periodTo)))
+                .filter(r -> status == null || status.isBlank() || "All".equalsIgnoreCase(status) || equalsIgnoreCase(r.getStatus(), status))
+                .filter(r -> paymentDate == null || paymentDate.equals(r.getPaymentDate()))
+                .toList();
+    }
+
+    private static boolean equalsIgnoreCase(String a, String b) {
+        return a != null && a.equalsIgnoreCase(b);
+    }
+
     // ── Dashboard ──────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
@@ -78,14 +109,37 @@ public class ServiceBillingService {
 
     // ── Create ─────────────────────────────────────────────────────────────
 
+    /**
+     * Creates a brand-new billing record. Every call — including a "Re-Add
+     * Billing" for a service that already has payment history — always
+     * inserts a fresh row (Requirement 1); existing records are never
+     * touched. Rejects a period that's already been billed for this exact
+     * service+vendor (Requirement 7).
+     */
     @Transactional
-    public ServiceBilling create(String service, String vendor, BigDecimal amount, LocalDate paymentDate,
+    public ServiceBilling create(String service, String vendor, LocalDate billingFromDate, LocalDate billingToDate,
+                                  BigDecimal amount, LocalDate paymentDate, LocalDate dueDate,
                                   String status, String remarks, MultipartFile invoiceFile) {
+        String svc = requireText(service, "Service");
+        String vnd = requireText(vendor, "Vendor");
+        LocalDate from = requireBillingDate(billingFromDate, "Billing From Date");
+        LocalDate to = requireBillingDate(billingToDate, "Billing To Date");
+        if (to.isBefore(from)) {
+            throw new IllegalArgumentException("Billing To Date cannot be before Billing From Date.");
+        }
+
+        if (repository.existsByServiceIgnoreCaseAndVendorIgnoreCaseAndBillingFromDateAndBillingToDate(svc, vnd, from, to)) {
+            throw new DuplicateResourceException("Billing for this period already exists.");
+        }
+
         ServiceBilling billing = new ServiceBilling();
-        billing.setService(requireText(service, "Service"));
-        billing.setVendor(requireText(vendor, "Vendor"));
+        billing.setService(svc);
+        billing.setVendor(vnd);
+        billing.setBillingFromDate(from);
+        billing.setBillingToDate(to);
         billing.setAmount(requireAmount(amount));
         billing.setPaymentDate(requirePaymentDate(paymentDate));
+        billing.setDueDate(dueDate);
         billing.setStatus(validateStatus(status));
         billing.setRemarks(remarks);
 
@@ -94,23 +148,41 @@ public class ServiceBillingService {
         }
 
         ServiceBilling saved = repository.save(billing);
-        log.info("Created service payment id={} service={} vendor={} amount={}", saved.getId(), saved.getService(), saved.getVendor(), saved.getAmount());
+        log.info("Created service billing id={} service={} vendor={} period={}..{} amount={}",
+                saved.getId(), saved.getService(), saved.getVendor(), from, to, saved.getAmount());
         auditLogService.record("SERVICE_BILLING", String.valueOf(saved.getId()), "CREATED",
-                "Added service payment for '" + saved.getService() + "' (" + saved.getVendor() + ")");
+                "Added billing record for '" + saved.getService() + "' (" + saved.getVendor() + ") period " + from + " to " + to);
         return saved;
     }
 
     // ── Update ─────────────────────────────────────────────────────────────
 
     @Transactional
-    public ServiceBilling update(Long id, String service, String vendor, BigDecimal amount, LocalDate paymentDate,
+    public ServiceBilling update(Long id, String service, String vendor, LocalDate billingFromDate, LocalDate billingToDate,
+                                  BigDecimal amount, LocalDate paymentDate, LocalDate dueDate,
                                   String status, String remarks, MultipartFile invoiceFile) {
         ServiceBilling billing = getById(id);
 
         if (service != null && !service.isBlank()) billing.setService(service.trim());
         if (vendor != null && !vendor.isBlank()) billing.setVendor(vendor.trim());
+
+        LocalDate newFrom = billingFromDate != null ? billingFromDate : billing.getBillingFromDate();
+        LocalDate newTo = billingToDate != null ? billingToDate : billing.getBillingToDate();
+        if ((billingFromDate != null || billingToDate != null) && newFrom != null && newTo != null) {
+            if (newTo.isBefore(newFrom)) {
+                throw new IllegalArgumentException("Billing To Date cannot be before Billing From Date.");
+            }
+            if (repository.existsByServiceIgnoreCaseAndVendorIgnoreCaseAndBillingFromDateAndBillingToDateAndIdNot(
+                    billing.getService(), billing.getVendor(), newFrom, newTo, id)) {
+                throw new DuplicateResourceException("Billing for this period already exists.");
+            }
+            billing.setBillingFromDate(newFrom);
+            billing.setBillingToDate(newTo);
+        }
+
         if (amount != null) billing.setAmount(requireAmount(amount));
         if (paymentDate != null) billing.setPaymentDate(paymentDate);
+        if (dueDate != null) billing.setDueDate(dueDate);
         if (status != null && !status.isBlank()) billing.setStatus(validateStatus(status));
         if (remarks != null) billing.setRemarks(remarks);
 
@@ -120,9 +192,9 @@ public class ServiceBillingService {
         }
 
         ServiceBilling saved = repository.save(billing);
-        log.info("Updated service payment id={}", id);
+        log.info("Updated service billing id={}", id);
         auditLogService.record("SERVICE_BILLING", String.valueOf(saved.getId()), "UPDATED",
-                "Updated service payment for '" + saved.getService() + "' (" + saved.getVendor() + ")");
+                "Updated billing record for '" + saved.getService() + "' (" + saved.getVendor() + ")");
         return saved;
     }
 
@@ -243,6 +315,13 @@ public class ServiceBillingService {
     private LocalDate requirePaymentDate(LocalDate date) {
         if (date == null) {
             throw new IllegalArgumentException("Payment date is required.");
+        }
+        return date;
+    }
+
+    private LocalDate requireBillingDate(LocalDate date, String label) {
+        if (date == null) {
+            throw new IllegalArgumentException(label + " is required.");
         }
         return date;
     }

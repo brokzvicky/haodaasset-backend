@@ -23,7 +23,19 @@ import java.time.LocalDateTime;
     indexes = {
         @Index(name = "idx_service_billing_status",       columnList = "status"),
         @Index(name = "idx_service_billing_payment_date",  columnList = "paymentDate"),
-        @Index(name = "idx_service_billing_vendor",        columnList = "vendor")
+        @Index(name = "idx_service_billing_vendor",        columnList = "vendor"),
+        @Index(name = "idx_service_billing_period",        columnList = "service, vendor, billing_from_date, billing_to_date")
+    },
+    uniqueConstraints = {
+        // Belt-and-braces DB-level guard against the same service+vendor
+        // being billed twice for an identical period. The service layer
+        // also checks this explicitly first so it can surface a friendly
+        // "Billing for this period already exists." message instead of a
+        // raw constraint-violation error.
+        @UniqueConstraint(
+            name = "uk_service_billing_period",
+            columnNames = {"service", "vendor", "billing_from_date", "billing_to_date"}
+        )
     }
 )
 public class ServiceBilling {
@@ -38,6 +50,16 @@ public class ServiceBilling {
     @NotBlank(message = "Vendor is required")
     private String vendor;
 
+    /** First day of the billing period this record covers, e.g. 01 Jun 2026. */
+    @NotNull(message = "Billing From Date is required")
+    @Column(name = "billing_from_date")
+    private LocalDate billingFromDate;
+
+    /** Last day of the billing period this record covers, e.g. 30 Jun 2026. */
+    @NotNull(message = "Billing To Date is required")
+    @Column(name = "billing_to_date")
+    private LocalDate billingToDate;
+
     @NotNull(message = "Amount is required")
     @Column(precision = 14, scale = 2)
     private BigDecimal amount;
@@ -45,6 +67,10 @@ public class ServiceBilling {
     @NotNull(message = "Payment date is required")
     @Column(name = "payment_date")
     private LocalDate paymentDate;
+
+    /** Optional — when this period's payment is due. */
+    @Column(name = "due_date")
+    private LocalDate dueDate;
 
     /** One of: Paid, Pending, Overdue. */
     @NotBlank(message = "Status is required")
@@ -95,11 +121,23 @@ public class ServiceBilling {
     public String getVendor() { return vendor; }
     public void setVendor(String vendor) { this.vendor = vendor; }
 
+    public LocalDate getBillingFromDate() { return billingFromDate; }
+    public void setBillingFromDate(LocalDate billingFromDate) { this.billingFromDate = billingFromDate; }
+
+    public LocalDate getBillingToDate() { return billingToDate; }
+    public void setBillingToDate(LocalDate billingToDate) { this.billingToDate = billingToDate; }
+
     public BigDecimal getAmount() { return amount; }
     public void setAmount(BigDecimal amount) { this.amount = amount; }
 
     public LocalDate getPaymentDate() { return paymentDate; }
     public void setPaymentDate(LocalDate paymentDate) { this.paymentDate = paymentDate; }
+
+    public LocalDate getDueDate() { return dueDate; }
+    public void setDueDate(LocalDate dueDate) { this.dueDate = dueDate; }
+
+    /** Human-friendly unique billing reference, e.g. "SB-000123". Derived from the DB id — never reused, never overwritten. */
+    public String getBillingId() { return id == null ? null : String.format("SB-%06d", id); }
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }

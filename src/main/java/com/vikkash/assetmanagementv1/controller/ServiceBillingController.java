@@ -1,6 +1,7 @@
 package com.vikkash.assetmanagementv1.controller;
 
 import com.vikkash.assetmanagementv1.entity.ServiceBilling;
+import com.vikkash.assetmanagementv1.service.ServiceBillingReportService;
 import com.vikkash.assetmanagementv1.service.ServiceBillingService;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpHeaders;
@@ -9,9 +10,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 
@@ -28,14 +31,41 @@ import java.util.Map;
 public class ServiceBillingController {
 
     private final ServiceBillingService service;
+    private final ServiceBillingReportService reportService;
 
-    public ServiceBillingController(ServiceBillingService service) {
+    public ServiceBillingController(ServiceBillingService service, ServiceBillingReportService reportService) {
         this.service = service;
+        this.reportService = reportService;
     }
 
     @GetMapping
     public List<ServiceBilling> getAll() {
         return service.getAll();
+    }
+
+    /**
+     * Search/filter (Requirement 9): by service, vendor, billing period
+     * (periodFrom/periodTo overlap), status, and exact payment date. Any
+     * param can be omitted. Powers both the list view's filter bar and the
+     * PDF/Excel export so exports always match what's on screen.
+     */
+    @GetMapping("/search")
+    public List<ServiceBilling> search(
+            @RequestParam(required = false) String service,
+            @RequestParam(required = false) String vendor,
+            @RequestParam(required = false) String periodFrom,
+            @RequestParam(required = false) String periodTo,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String paymentDate
+    ) {
+        return this.service.search(service, vendor, parseDateOrNull(periodFrom), parseDateOrNull(periodTo),
+                status, parseDateOrNull(paymentDate));
+    }
+
+    /** Billing History (Requirement 6): every past billing period for one service+vendor, latest first. */
+    @GetMapping("/history")
+    public List<ServiceBilling> history(@RequestParam String service, @RequestParam String vendor) {
+        return this.service.getHistory(service, vendor);
     }
 
     @GetMapping("/dashboard")
@@ -49,45 +79,101 @@ public class ServiceBillingController {
     }
 
     /**
-     * Creates a new service payment. Accepts multipart/form-data so the
-     * optional PDF invoice can be uploaded in the same request as the
-     * payment details.
+     * Creates a new billing record for a billing period. Accepts
+     * multipart/form-data so the invoice can be uploaded in the same
+     * request. Never overwrites an existing record — every call (including
+     * "Re-Add Billing" for a service with prior history) inserts a new row
+     * (Requirement 1) and is rejected with 409 if the exact
+     * service+vendor+period combination already exists (Requirement 7).
      */
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ServiceBilling> create(
             @RequestParam String service,
             @RequestParam String vendor,
+            @RequestParam("billingFromDate") String billingFromDate,
+            @RequestParam("billingToDate") String billingToDate,
             @RequestParam BigDecimal amount,
             @RequestParam("paymentDate") String paymentDate,
+            @RequestParam(required = false) String dueDate,
             @RequestParam(required = false, defaultValue = "Pending") String status,
             @RequestParam(required = false) String remarks,
             @RequestParam(value = "invoiceFile", required = false) MultipartFile invoiceFile
     ) {
         ServiceBilling created = this.service.create(
-                service, vendor, amount, LocalDate.parse(paymentDate), status, remarks, invoiceFile);
+                service, vendor, LocalDate.parse(billingFromDate), LocalDate.parse(billingToDate),
+                amount, LocalDate.parse(paymentDate), parseDateOrNull(dueDate), status, remarks, invoiceFile);
         return ResponseEntity.status(201).body(created);
     }
 
     /**
-     * Updates an existing service payment. All fields are optional here —
-     * only non-null/non-blank values overwrite the existing record — and a
-     * new invoice file (if provided) replaces the old one.
+     * Updates an existing billing record in place (e.g. correcting a typo or
+     * marking it Paid) — distinct from "Re-Add Billing", which always
+     * creates a new record. All fields are optional here — only
+     * non-null/non-blank values overwrite the existing record — and a new
+     * invoice file (if provided) replaces the old one for this record only.
      */
     @PutMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ServiceBilling> update(
             @PathVariable Long id,
             @RequestParam(required = false) String service,
             @RequestParam(required = false) String vendor,
+            @RequestParam(value = "billingFromDate", required = false) String billingFromDate,
+            @RequestParam(value = "billingToDate", required = false) String billingToDate,
             @RequestParam(required = false) BigDecimal amount,
             @RequestParam(value = "paymentDate", required = false) String paymentDate,
+            @RequestParam(value = "dueDate", required = false) String dueDate,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String remarks,
             @RequestParam(value = "invoiceFile", required = false) MultipartFile invoiceFile
     ) {
-        LocalDate parsedDate = (paymentDate != null && !paymentDate.isBlank()) ? LocalDate.parse(paymentDate) : null;
         ServiceBilling updated = this.service.update(
-                id, service, vendor, amount, parsedDate, status, remarks, invoiceFile);
+                id, service, vendor, parseDateOrNull(billingFromDate), parseDateOrNull(billingToDate),
+                amount, parseDateOrNull(paymentDate), parseDateOrNull(dueDate), status, remarks, invoiceFile);
         return ResponseEntity.ok(updated);
+    }
+
+    /** PDF export (Requirement 10). Accepts the same filters as /search so it always matches the current view. */
+    @GetMapping("/export/pdf")
+    public ResponseEntity<byte[]> exportPdf(
+            @RequestParam(required = false) String service,
+            @RequestParam(required = false) String vendor,
+            @RequestParam(required = false) String periodFrom,
+            @RequestParam(required = false) String periodTo,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String paymentDate
+    ) throws IOException {
+        List<ServiceBilling> records = this.service.search(service, vendor, parseDateOrNull(periodFrom),
+                parseDateOrNull(periodTo), status, parseDateOrNull(paymentDate));
+        byte[] pdf = reportService.generatePdf(records);
+        String filename = "service-billing-report-" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")) + ".pdf";
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .body(pdf);
+    }
+
+    /** Excel export (Requirement 10). Accepts the same filters as /search so it always matches the current view. */
+    @GetMapping("/export/excel")
+    public ResponseEntity<byte[]> exportExcel(
+            @RequestParam(required = false) String service,
+            @RequestParam(required = false) String vendor,
+            @RequestParam(required = false) String periodFrom,
+            @RequestParam(required = false) String periodTo,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String paymentDate
+    ) throws IOException {
+        List<ServiceBilling> records = this.service.search(service, vendor, parseDateOrNull(periodFrom),
+                parseDateOrNull(periodTo), status, parseDateOrNull(paymentDate));
+        byte[] excel = reportService.generateExcel(records);
+        String filename = "service-billing-report-" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")) + ".xlsx";
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .body(excel);
+    }
+
+    private static LocalDate parseDateOrNull(String value) {
+        return (value == null || value.isBlank()) ? null : LocalDate.parse(value);
     }
 
     /** Uploads or replaces just the invoice for an existing payment, without touching other fields. */
