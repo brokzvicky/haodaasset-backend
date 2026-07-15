@@ -18,6 +18,18 @@ public class AssignAssetRequest {
     private String assignedDate;
     private String remarks;
 
+    /** "Permanent" or "Temporary". Defaults to "Permanent" when omitted. */
+    private String assignmentType;
+
+    /** Required when assignmentType = "Temporary": why the assignment is temporary. */
+    private String temporaryReason;
+
+    /** Required when assignmentType = "Temporary": how many days the laptop is assigned for. */
+    private Integer temporaryDurationDays;
+
+    /** Optional: any issues noted with the employee's previous/old asset. */
+    private String oldAssetIssues;
+
     public String getEmployeeId()   { return employeeId; }
     public void setEmployeeId(String v) { this.employeeId = v; }
 
@@ -35,4 +47,16 @@ public class AssignAssetRequest {
 
     public String getRemarks()   { return remarks; }
     public void setRemarks(String v) { this.remarks = v; }
+
+    public String getAssignmentType()   { return assignmentType; }
+    public void setAssignmentType(String v) { this.assignmentType = v; }
+
+    public String getTemporaryReason()   { return temporaryReason; }
+    public void setTemporaryReason(String v) { this.temporaryReason = v; }
+
+    public Integer getTemporaryDurationDays()   { return temporaryDurationDays; }
+    public void setTemporaryDurationDays(Integer v) { this.temporaryDurationDays = v; }
+
+    public String getOldAssetIssues()   { return oldAssetIssues; }
+    public void setOldAssetIssues(String v) { this.oldAssetIssues = v; }
 }

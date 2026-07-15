@@ -127,6 +127,17 @@ public class AssetService {
 
     @Transactional
     public Asset assignAsset(Long id, AssignAssetRequest request) {
+        return assignAsset(id, request, null);
+    }
+
+    /**
+     * @param assignedByAdmin username of the admin performing the assignment (may be null,
+     *                         e.g. for internal/system calls). Recorded on the asset so that,
+     *                         for a Temporary assignment, the "period expired" reminder email
+     *                         can be routed back to the admin who made the assignment.
+     */
+    @Transactional
+    public Asset assignAsset(Long id, AssignAssetRequest request, String assignedByAdmin) {
         Asset asset = getById(id);
 
         // Guard: cannot assign an asset that is not Available
@@ -144,6 +155,22 @@ public class AssetService {
             }
         }
 
+        // Guard: assignment type must be Permanent or Temporary, and Temporary
+        // assignments must include a reason and a duration.
+        String assignmentType = (request.getAssignmentType() == null || request.getAssignmentType().isBlank())
+                ? "Permanent" : request.getAssignmentType().trim();
+        if (!"Permanent".equalsIgnoreCase(assignmentType) && !"Temporary".equalsIgnoreCase(assignmentType)) {
+            throw new IllegalArgumentException("assignmentType must be either 'Permanent' or 'Temporary'.");
+        }
+        if ("Temporary".equalsIgnoreCase(assignmentType)) {
+            if (request.getTemporaryReason() == null || request.getTemporaryReason().isBlank()) {
+                throw new IllegalArgumentException("A reason is required for a temporary assignment.");
+            }
+            if (request.getTemporaryDurationDays() == null || request.getTemporaryDurationDays() <= 0) {
+                throw new IllegalArgumentException("A valid duration (in days) is required for a temporary assignment.");
+            }
+        }
+
         asset.setEmployeeId(
                 request.getEmployeeId() != null && !request.getEmployeeId().isBlank()
                         ? request.getEmployeeId().trim().toUpperCase()
@@ -152,11 +179,10 @@ public class AssetService {
         asset.setEmployeeName(request.getEmployeeName());
         asset.setEmployeeRole(request.getEmployeeRole());
         asset.setLocation(request.getLocation() != null ? request.getLocation() : asset.getLocation());
-        asset.setAssignedDate(
-                request.getAssignedDate() != null
-                        ? request.getAssignedDate()
-                        : LocalDate.now().toString()
-        );
+        String effectiveAssignedDate = request.getAssignedDate() != null
+                ? request.getAssignedDate()
+                : LocalDate.now().toString();
+        asset.setAssignedDate(effectiveAssignedDate);
         asset.setReason(request.getRemarks());
         asset.setAssetStatus("Assigned");
         // Clear any previous return tracking on reassignment
@@ -165,11 +191,40 @@ public class AssetService {
         // New assignment ⇒ no assignment email has gone out for it yet
         asset.setEmailStatus("Not Sent");
 
-        log.info("Asset {} assigned to employee {}", id, request.getEmployeeName());
+        // Any issues flagged on the employee's previous/old asset (free text, optional)
+        asset.setOldAssetIssues(request.getOldAssetIssues());
+        asset.setAssignedByAdmin(assignedByAdmin);
+
+        if ("Temporary".equalsIgnoreCase(assignmentType)) {
+            LocalDate start;
+            try {
+                start = LocalDate.parse(effectiveAssignedDate);
+            } catch (Exception ex) {
+                start = LocalDate.now();
+            }
+            asset.setAssignmentType("Temporary");
+            asset.setTemporaryReason(request.getTemporaryReason().trim());
+            asset.setTemporaryDurationDays(request.getTemporaryDurationDays());
+            asset.setTemporaryExpiryDate(start.plusDays(request.getTemporaryDurationDays()).toString());
+            asset.setTemporaryReturnReminderSent("No");
+        } else {
+            asset.setAssignmentType("Permanent");
+            asset.setTemporaryReason(null);
+            asset.setTemporaryDurationDays(null);
+            asset.setTemporaryExpiryDate(null);
+            asset.setTemporaryReturnReminderSent("No");
+        }
+
+        log.info("Asset {} assigned to employee {} ({})", id, request.getEmployeeName(), asset.getAssignmentType());
         Asset saved = assetRepository.save(asset);
-        auditLogService.record("ASSET", String.valueOf(saved.getAssetId()), "ASSIGNED",
-                "Assigned '" + saved.getLaptopName() + "' to " + saved.getEmployeeName()
-                        + (saved.getEmployeeId() != null ? " (" + saved.getEmployeeId() + ")" : ""));
+        String auditNote = "Assigned '" + saved.getLaptopName() + "' to " + saved.getEmployeeName()
+                + (saved.getEmployeeId() != null ? " (" + saved.getEmployeeId() + ")" : "")
+                + " — " + saved.getAssignmentType()
+                + ("Temporary".equalsIgnoreCase(saved.getAssignmentType())
+                        ? " (" + saved.getTemporaryDurationDays() + " day(s), reason: " + saved.getTemporaryReason()
+                                + ", expires " + saved.getTemporaryExpiryDate() + ")"
+                        : "");
+        auditLogService.record("ASSET", String.valueOf(saved.getAssetId()), "ASSIGNED", auditNote);
         return saved;
     }
 
@@ -266,6 +321,13 @@ public class AssetService {
             asset.setEmployeeRole(null);
             asset.setAssignedDate(null);
             asset.setAssetStatus("Available");
+            asset.setAssignmentType("Permanent");
+            asset.setTemporaryReason(null);
+            asset.setTemporaryDurationDays(null);
+            asset.setTemporaryExpiryDate(null);
+            asset.setTemporaryReturnReminderSent("No");
+            asset.setAssignedByAdmin(null);
+            asset.setOldAssetIssues(null);
             assetRepository.save(asset);
 
             repaired.add(new RepairResultDTO(
@@ -406,6 +468,14 @@ public class AssetService {
         asset.setEmployeeRole(null);
         asset.setAssignedDate(null);
         asset.setEmailStatus("Not Sent");
+        // Clear temporary-assignment tracking so it never carries over to the next assignment
+        asset.setAssignmentType("Permanent");
+        asset.setTemporaryReason(null);
+        asset.setTemporaryDurationDays(null);
+        asset.setTemporaryExpiryDate(null);
+        asset.setTemporaryReturnReminderSent("No");
+        asset.setAssignedByAdmin(null);
+        asset.setOldAssetIssues(null);
 
         log.info("Asset {} returned. New status: {}", id, nextStatus);
         Asset saved = assetRepository.save(asset);

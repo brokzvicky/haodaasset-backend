@@ -8,6 +8,7 @@ import com.vikkash.assetmanagementv1.dto.SendAssetEmailResponse;
 import com.vikkash.assetmanagementv1.entity.Asset;
 import com.vikkash.assetmanagementv1.service.AssetEmailService;
 import com.vikkash.assetmanagementv1.service.AssetService;
+import com.vikkash.assetmanagementv1.service.TemporaryAssignmentReminderService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -32,10 +33,13 @@ public class AssetController {
 
     private final AssetService assetService;
     private final AssetEmailService assetEmailService;
+    private final TemporaryAssignmentReminderService temporaryAssignmentReminderService;
 
-    public AssetController(AssetService assetService, AssetEmailService assetEmailService) {
+    public AssetController(AssetService assetService, AssetEmailService assetEmailService,
+                            TemporaryAssignmentReminderService temporaryAssignmentReminderService) {
         this.assetService = assetService;
         this.assetEmailService = assetEmailService;
+        this.temporaryAssignmentReminderService = temporaryAssignmentReminderService;
     }
 
     @GetMapping
@@ -98,8 +102,22 @@ public class AssetController {
 
     @PutMapping("/assign/{id}")
     public ResponseEntity<Asset> assignAsset(@PathVariable Long id,
-                                              @Valid @RequestBody AssignAssetRequest request) {
-        return ResponseEntity.ok(assetService.assignAsset(id, request));
+                                              @Valid @RequestBody AssignAssetRequest request,
+                                              Authentication authentication) {
+        String assignedByAdmin = authentication != null ? authentication.getName() : null;
+        return ResponseEntity.ok(assetService.assignAsset(id, request, assignedByAdmin));
+    }
+
+    /**
+     * Manually runs the "temporary assignment expired" scan (normally run on
+     * a daily schedule — see TemporaryAssignmentReminderService). Handy for
+     * an admin who wants to trigger the check on demand rather than waiting
+     * for the next scheduled run.
+     */
+    @PostMapping("/check-temporary-expirations")
+    public ResponseEntity<Map<String, Object>> checkTemporaryExpirations() {
+        int sent = temporaryAssignmentReminderService.runCheck();
+        return ResponseEntity.ok(Map.of("remindersSent", sent));
     }
 
     @PutMapping("/return/{id}")

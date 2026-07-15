@@ -91,6 +91,44 @@ public class Asset {
     private String relievedStatus;
     private String relievedDate;
 
+    // ── Temporary vs Permanent assignment tracking ─────────────────────────
+    /**
+     * "Permanent" (default) or "Temporary". Captured at assignment time.
+     * Permanent assignments require no further information. Temporary
+     * assignments require temporaryReason + temporaryDurationDays, from
+     * which temporaryExpiryDate is derived.
+     */
+    @Column(name = "assignment_type")
+    private String assignmentType = "Permanent";
+
+    /** Why the asset is only temporarily assigned (required when assignmentType = "Temporary"). */
+    @Column(name = "temporary_reason")
+    private String temporaryReason;
+
+    /** Number of days the temporary assignment lasts for, as chosen by the admin. */
+    @Column(name = "temporary_duration_days")
+    private Integer temporaryDurationDays;
+
+    /** assignedDate + temporaryDurationDays — the date the laptop should be collected back. */
+    @Column(name = "temporary_expiry_date")
+    private String temporaryExpiryDate;
+
+    /**
+     * "Yes"/"No" — whether the "temporary assignment expired" reminder email
+     * has already been sent for the *current* temporary assignment. Reset to
+     * "No" on every new assignment so a stale flag never carries over.
+     */
+    @Column(name = "temporary_return_reminder_sent")
+    private String temporaryReturnReminderSent = "No";
+
+    /** Username of the admin who performed the assignment — used to route the expiry reminder email. */
+    @Column(name = "assigned_by_admin")
+    private String assignedByAdmin;
+
+    /** Any issues noted with the employee's previous/old asset at the time of this assignment (optional, free text). */
+    @Column(name = "old_asset_issues")
+    private String oldAssetIssues;
+
     public Asset() {}
 
     // ── Getters & Setters ──────────────────────────────────────────────────
@@ -175,4 +213,25 @@ public class Asset {
 
     public String getRelievedDate() { return relievedDate; }
     public void setRelievedDate(String relievedDate) { this.relievedDate = relievedDate; }
+
+    public String getAssignmentType() { return assignmentType; }
+    public void setAssignmentType(String assignmentType) { this.assignmentType = assignmentType; }
+
+    public String getTemporaryReason() { return temporaryReason; }
+    public void setTemporaryReason(String temporaryReason) { this.temporaryReason = temporaryReason; }
+
+    public Integer getTemporaryDurationDays() { return temporaryDurationDays; }
+    public void setTemporaryDurationDays(Integer temporaryDurationDays) { this.temporaryDurationDays = temporaryDurationDays; }
+
+    public String getTemporaryExpiryDate() { return temporaryExpiryDate; }
+    public void setTemporaryExpiryDate(String temporaryExpiryDate) { this.temporaryExpiryDate = temporaryExpiryDate; }
+
+    public String getTemporaryReturnReminderSent() { return temporaryReturnReminderSent; }
+    public void setTemporaryReturnReminderSent(String temporaryReturnReminderSent) { this.temporaryReturnReminderSent = temporaryReturnReminderSent; }
+
+    public String getAssignedByAdmin() { return assignedByAdmin; }
+    public void setAssignedByAdmin(String assignedByAdmin) { this.assignedByAdmin = assignedByAdmin; }
+
+    public String getOldAssetIssues() { return oldAssetIssues; }
+    public void setOldAssetIssues(String oldAssetIssues) { this.oldAssetIssues = oldAssetIssues; }
 }

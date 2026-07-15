@@ -160,6 +160,153 @@ public class EmailService {
         }
     }
 
+    /** Immutable bag of fields needed to render the "temporary assignment expired" admin reminder email. */
+    public record TemporaryAssignmentExpiredDetails(
+            Long assetId,
+            String assetName,
+            String brand,
+            String model,
+            String serialNumber,
+            String employeeName,
+            String employeeId,
+            String temporaryReason,
+            Integer durationDays,
+            String assignedDate,
+            String expiryDate
+    ) {}
+
+    /**
+     * Sends the admin-facing reminder that a temporary assignment's period
+     * has ended and the laptop should be collected back.
+     *
+     * @param to      the admin's email address (the admin who made the assignment,
+     *                or the configured fallback recovery address)
+     * @param details asset/employee fields to render into the email body
+     */
+    public void sendTemporaryAssignmentExpiredEmail(String to, TemporaryAssignmentExpiredDetails details) {
+        try {
+            ObjectNode root = objectMapper.createObjectNode();
+
+            ObjectNode sender = root.putObject("sender");
+            sender.put("name", fromName);
+            sender.put("email", fromAddress);
+
+            ObjectNode recipient = objectMapper.createObjectNode();
+            recipient.put("email", to);
+            root.putArray("to").add(recipient);
+
+            root.put("subject", "Temporary Assignment Expired — " + details.assetName());
+            root.put("htmlContent", buildTemporaryAssignmentExpiredHtml(details));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("api-key", brevoApiKey);
+            headers.set("accept", "application/json");
+
+            HttpEntity<String> request = new HttpEntity<>(objectMapper.writeValueAsString(root), headers);
+
+            restTemplate.postForEntity(BREVO_API_URL, request, String.class);
+            log.info("Temporary assignment expiry email sent via Brevo API: asset={} to={}",
+                    details.assetName(), maskEmail(to));
+        } catch (ResourceAccessException ex) {
+            log.error("Network error calling Brevo API for temporary assignment expiry email to {}: {}",
+                    maskEmail(to), ex.getMessage());
+            throw new EmailDeliveryException(
+                    "Couldn't send the temporary assignment expiry email right now. Please try again in a moment.", ex);
+        } catch (RestClientException ex) {
+            HttpStatusCode status = extractStatus(ex);
+            log.error("Brevo API rejected temporary assignment expiry email to {} (status={}): {}",
+                    maskEmail(to), status, ex.getMessage());
+            throw new EmailDeliveryException(
+                    "Couldn't send the temporary assignment expiry email right now. Please try again in a moment.", ex);
+        } catch (Exception ex) {
+            log.error("Unexpected failure sending temporary assignment expiry email to {}: {}", maskEmail(to), ex.getMessage());
+            throw new EmailDeliveryException(
+                    "Couldn't send the temporary assignment expiry email right now. Please try again in a moment.", ex);
+        }
+    }
+
+    private String buildTemporaryAssignmentExpiredHtml(TemporaryAssignmentExpiredDetails a) {
+        return """
+                <!DOCTYPE html>
+                <html>
+                <body style="margin:0;padding:0;background:#f1f5f9;font-family:'Segoe UI',Arial,sans-serif;">
+                  <table width="100%%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:32px 0;">
+                    <tr><td align="center">
+                      <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,0.08);">
+                        <tr>
+                          <td style="background:linear-gradient(135deg,#b45309,#f59e0b);padding:28px 32px;">
+                            <table cellpadding="0" cellspacing="0"><tr>
+                              <td style="width:38px;height:38px;background:#ffffff;border-radius:9px;text-align:center;vertical-align:middle;font-weight:800;color:#b45309;font-size:15px;">H</td>
+                              <td style="padding-left:12px;">
+                                <div style="color:#ffffff;font-size:18px;font-weight:700;letter-spacing:0.3px;">Haoda</div>
+                                <div style="color:#fef3c7;font-size:12.5px;margin-top:1px;">Enterprise IT Asset Management</div>
+                              </td>
+                            </tr></table>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style="padding:32px;">
+                            <div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:6px;">⏰ Temporary assignment period has expired</div>
+                            <p style="font-size:13.5px;color:#475569;line-height:1.6;margin:0 0 22px;">
+                              The temporary assignment period has expired. Please collect the laptop back.
+                            </p>
+
+                            <table width="100%%" cellpadding="0" cellspacing="0" style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;margin-bottom:18px;">
+                              <tr><td style="padding:16px 18px;">
+                                <div style="font-size:15px;font-weight:700;color:#b45309;margin-bottom:10px;">%s</div>
+                                <table width="100%%" cellpadding="0" cellspacing="0" style="font-size:12.5px;color:#334155;">
+                                  <tr><td style="padding:3px 0;color:#64748b;width:150px;">Asset ID</td><td style="padding:3px 0;font-weight:600;">#%d</td></tr>
+                                  <tr><td style="padding:3px 0;color:#64748b;">Brand / Model</td><td style="padding:3px 0;font-weight:600;">%s %s</td></tr>
+                                  <tr><td style="padding:3px 0;color:#64748b;">Serial Number</td><td style="padding:3px 0;font-weight:600;">%s</td></tr>
+                                  <tr><td style="padding:3px 0;color:#64748b;">Assigned Date</td><td style="padding:3px 0;font-weight:600;">%s</td></tr>
+                                  <tr><td style="padding:3px 0;color:#64748b;">Expired On</td><td style="padding:3px 0;font-weight:600;">%s</td></tr>
+                                  <tr><td style="padding:3px 0;color:#64748b;">Duration Selected</td><td style="padding:3px 0;font-weight:600;">%d day(s)</td></tr>
+                                  <tr><td style="padding:3px 0;color:#64748b;">Reason for Temporary Assignment</td><td style="padding:3px 0;font-weight:600;">%s</td></tr>
+                                </table>
+                              </td></tr>
+                            </table>
+
+                            <table width="100%%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:6px;">
+                              <tr><td style="padding:14px 18px;">
+                                <div style="font-size:12px;font-weight:700;color:#0f172a;margin-bottom:6px;">Currently Held By</div>
+                                <table width="100%%" cellpadding="0" cellspacing="0" style="font-size:12.5px;color:#334155;">
+                                  <tr><td style="padding:2px 0;color:#64748b;width:150px;">Name</td><td style="padding:2px 0;font-weight:600;">%s</td></tr>
+                                  <tr><td style="padding:2px 0;color:#64748b;">Employee ID</td><td style="padding:2px 0;font-weight:600;">%s</td></tr>
+                                </table>
+                              </td></tr>
+                            </table>
+
+                            <p style="font-size:12.5px;color:#64748b;line-height:1.6;margin:20px 0 4px;">
+                              Please arrange to collect the laptop back from the employee and update its status
+                              in Haoda Asset once returned.
+                            </p>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style="padding:18px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;">
+                            <div style="font-size:11px;color:#94a3b8;">
+                              This is an automated message from Haoda Asset. Please do not reply directly to this email.
+                            </div>
+                            <div style="font-size:11px;color:#cbd5e1;margin-top:4px;">
+                              © %d Haoda Payments. All rights reserved.
+                            </div>
+                          </td>
+                        </tr>
+                      </table>
+                    </td></tr>
+                  </table>
+                </body>
+                </html>
+                """.formatted(
+                        a.assetName(), a.assetId(), nullSafe(a.brand()), nullSafe(a.model()),
+                        nullSafe(a.serialNumber()), nullSafe(a.assignedDate()), nullSafe(a.expiryDate()),
+                        a.durationDays() != null ? a.durationDays() : 0, nullSafe(a.temporaryReason()),
+                        nullSafe(a.employeeName()), nullSafe(a.employeeId()),
+                        java.time.Year.now().getValue()
+                );
+    }
+
     /** Immutable bag of asset fields needed to render the assignment email. */
     public record AssetAssignmentEmailDetails(
             Long assetId,

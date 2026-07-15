@@ -15,6 +15,7 @@ public interface AssetRepository extends JpaRepository<Asset, Long> {
 
     // ── Lookup methods ─────────────────────────────────────────────────────
     List<Asset> findByAssetStatus(String assetStatus);
+    List<Asset> findByAssetStatusAndAssignmentType(String assetStatus, String assignmentType);
     List<Asset> findByEmployeeName(String employeeName);
     List<Asset> findByEmployeeId(String employeeId);
     Optional<Asset> findBySerialNumber(String serialNumber);
