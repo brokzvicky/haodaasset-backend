@@ -84,6 +84,32 @@ public class ServiceBilling {
     @Column(name = "invoice_original_name")
     private String invoiceOriginalName;
 
+    // ── Invoice PDF Auto-Fill fields (Requirement: "Invoice PDF Auto-Fill").
+    // All optional — populated from the uploaded invoice when confidently
+    // detected, otherwise left null for manual entry. ─────────────────────
+
+    @Column(name = "invoice_number")
+    private String invoiceNumber;
+
+    @Column(name = "invoice_date")
+    private LocalDate invoiceDate;
+
+    @Column(name = "gst_amount", precision = 14, scale = 2)
+    private BigDecimal gstAmount;
+
+    @Column(name = "total_amount", precision = 14, scale = 2)
+    private BigDecimal totalAmount;
+
+    /** ISO-ish currency label, e.g. "INR", "USD". */
+    private String currency;
+
+    @Column(name = "invoice_reference")
+    private String invoiceReference;
+
+    /** Description / service details as printed on the invoice (distinct from the admin's own free-text "remarks"). */
+    @Column(name = "service_details", columnDefinition = "TEXT")
+    private String serviceDetails;
+
     @Column(columnDefinition = "TEXT")
     private String remarks;
 
@@ -150,6 +176,27 @@ public class ServiceBilling {
 
     public String getRemarks() { return remarks; }
     public void setRemarks(String remarks) { this.remarks = remarks; }
+
+    public String getInvoiceNumber() { return invoiceNumber; }
+    public void setInvoiceNumber(String invoiceNumber) { this.invoiceNumber = invoiceNumber; }
+
+    public LocalDate getInvoiceDate() { return invoiceDate; }
+    public void setInvoiceDate(LocalDate invoiceDate) { this.invoiceDate = invoiceDate; }
+
+    public BigDecimal getGstAmount() { return gstAmount; }
+    public void setGstAmount(BigDecimal gstAmount) { this.gstAmount = gstAmount; }
+
+    public BigDecimal getTotalAmount() { return totalAmount; }
+    public void setTotalAmount(BigDecimal totalAmount) { this.totalAmount = totalAmount; }
+
+    public String getCurrency() { return currency; }
+    public void setCurrency(String currency) { this.currency = currency; }
+
+    public String getInvoiceReference() { return invoiceReference; }
+    public void setInvoiceReference(String invoiceReference) { this.invoiceReference = invoiceReference; }
+
+    public String getServiceDetails() { return serviceDetails; }
+    public void setServiceDetails(String serviceDetails) { this.serviceDetails = serviceDetails; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

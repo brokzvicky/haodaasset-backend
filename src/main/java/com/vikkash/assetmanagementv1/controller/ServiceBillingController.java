@@ -1,6 +1,8 @@
 package com.vikkash.assetmanagementv1.controller;
 
+import com.vikkash.assetmanagementv1.dto.InvoiceExtractionResult;
 import com.vikkash.assetmanagementv1.entity.ServiceBilling;
+import com.vikkash.assetmanagementv1.service.InvoiceExtractionService;
 import com.vikkash.assetmanagementv1.service.ServiceBillingReportService;
 import com.vikkash.assetmanagementv1.service.ServiceBillingService;
 import org.springframework.core.io.FileSystemResource;
@@ -32,10 +34,27 @@ public class ServiceBillingController {
 
     private final ServiceBillingService service;
     private final ServiceBillingReportService reportService;
+    private final InvoiceExtractionService invoiceExtractionService;
 
-    public ServiceBillingController(ServiceBillingService service, ServiceBillingReportService reportService) {
+    public ServiceBillingController(ServiceBillingService service, ServiceBillingReportService reportService,
+                                     InvoiceExtractionService invoiceExtractionService) {
         this.service = service;
         this.reportService = reportService;
+        this.invoiceExtractionService = invoiceExtractionService;
+    }
+
+    /**
+     * Invoice PDF Auto-Fill (Service Billing only): reads an uploaded invoice
+     * PDF and returns whatever fields could be confidently identified — it
+     * never creates or touches a billing record. The frontend uses this to
+     * fill blank form fields for the admin to review before saving; any
+     * field left null here simply stays blank/untouched on the form.
+     * Supports both text-based and scanned (OCR) invoice PDFs.
+     */
+    @PostMapping(value = "/extract-invoice", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<InvoiceExtractionResult> extractInvoice(
+            @RequestParam("invoiceFile") MultipartFile invoiceFile) {
+        return ResponseEntity.ok(invoiceExtractionService.extract(invoiceFile));
     }
 
     @GetMapping
@@ -97,11 +116,20 @@ public class ServiceBillingController {
             @RequestParam(required = false) String dueDate,
             @RequestParam(required = false, defaultValue = "Pending") String status,
             @RequestParam(required = false) String remarks,
-            @RequestParam(value = "invoiceFile", required = false) MultipartFile invoiceFile
+            @RequestParam(value = "invoiceFile", required = false) MultipartFile invoiceFile,
+            @RequestParam(required = false) String invoiceNumber,
+            @RequestParam(required = false) String invoiceDate,
+            @RequestParam(required = false) BigDecimal gstAmount,
+            @RequestParam(required = false) BigDecimal totalAmount,
+            @RequestParam(required = false) String currency,
+            @RequestParam(required = false) String invoiceReference,
+            @RequestParam(required = false) String serviceDetails
     ) {
         ServiceBilling created = this.service.create(
                 service, vendor, LocalDate.parse(billingFromDate), LocalDate.parse(billingToDate),
-                amount, LocalDate.parse(paymentDate), parseDateOrNull(dueDate), status, remarks, invoiceFile);
+                amount, LocalDate.parse(paymentDate), parseDateOrNull(dueDate), status, remarks, invoiceFile,
+                invoiceNumber, parseDateOrNull(invoiceDate), gstAmount, totalAmount, currency,
+                invoiceReference, serviceDetails);
         return ResponseEntity.status(201).body(created);
     }
 
@@ -124,11 +152,20 @@ public class ServiceBillingController {
             @RequestParam(value = "dueDate", required = false) String dueDate,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String remarks,
-            @RequestParam(value = "invoiceFile", required = false) MultipartFile invoiceFile
+            @RequestParam(value = "invoiceFile", required = false) MultipartFile invoiceFile,
+            @RequestParam(required = false) String invoiceNumber,
+            @RequestParam(required = false) String invoiceDate,
+            @RequestParam(required = false) BigDecimal gstAmount,
+            @RequestParam(required = false) BigDecimal totalAmount,
+            @RequestParam(required = false) String currency,
+            @RequestParam(required = false) String invoiceReference,
+            @RequestParam(required = false) String serviceDetails
     ) {
         ServiceBilling updated = this.service.update(
                 id, service, vendor, parseDateOrNull(billingFromDate), parseDateOrNull(billingToDate),
-                amount, parseDateOrNull(paymentDate), parseDateOrNull(dueDate), status, remarks, invoiceFile);
+                amount, parseDateOrNull(paymentDate), parseDateOrNull(dueDate), status, remarks, invoiceFile,
+                invoiceNumber, parseDateOrNull(invoiceDate), gstAmount, totalAmount, currency,
+                invoiceReference, serviceDetails);
         return ResponseEntity.ok(updated);
     }
 

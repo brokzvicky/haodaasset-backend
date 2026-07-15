@@ -119,7 +119,10 @@ public class ServiceBillingService {
     @Transactional
     public ServiceBilling create(String service, String vendor, LocalDate billingFromDate, LocalDate billingToDate,
                                   BigDecimal amount, LocalDate paymentDate, LocalDate dueDate,
-                                  String status, String remarks, MultipartFile invoiceFile) {
+                                  String status, String remarks, MultipartFile invoiceFile,
+                                  String invoiceNumber, LocalDate invoiceDate, BigDecimal gstAmount,
+                                  BigDecimal totalAmount, String currency, String invoiceReference,
+                                  String serviceDetails) {
         String svc = requireText(service, "Service");
         String vnd = requireText(vendor, "Vendor");
         LocalDate from = requireBillingDate(billingFromDate, "Billing From Date");
@@ -142,6 +145,13 @@ public class ServiceBillingService {
         billing.setDueDate(dueDate);
         billing.setStatus(validateStatus(status));
         billing.setRemarks(remarks);
+        billing.setInvoiceNumber(blankToNull(invoiceNumber));
+        billing.setInvoiceDate(invoiceDate);
+        billing.setGstAmount(gstAmount);
+        billing.setTotalAmount(totalAmount);
+        billing.setCurrency(blankToNull(currency));
+        billing.setInvoiceReference(blankToNull(invoiceReference));
+        billing.setServiceDetails(blankToNull(serviceDetails));
 
         if (invoiceFile != null && !invoiceFile.isEmpty()) {
             storeInvoice(billing, invoiceFile);
@@ -160,7 +170,10 @@ public class ServiceBillingService {
     @Transactional
     public ServiceBilling update(Long id, String service, String vendor, LocalDate billingFromDate, LocalDate billingToDate,
                                   BigDecimal amount, LocalDate paymentDate, LocalDate dueDate,
-                                  String status, String remarks, MultipartFile invoiceFile) {
+                                  String status, String remarks, MultipartFile invoiceFile,
+                                  String invoiceNumber, LocalDate invoiceDate, BigDecimal gstAmount,
+                                  BigDecimal totalAmount, String currency, String invoiceReference,
+                                  String serviceDetails) {
         ServiceBilling billing = getById(id);
 
         if (service != null && !service.isBlank()) billing.setService(service.trim());
@@ -185,6 +198,13 @@ public class ServiceBillingService {
         if (dueDate != null) billing.setDueDate(dueDate);
         if (status != null && !status.isBlank()) billing.setStatus(validateStatus(status));
         if (remarks != null) billing.setRemarks(remarks);
+        if (invoiceNumber != null) billing.setInvoiceNumber(blankToNull(invoiceNumber));
+        if (invoiceDate != null) billing.setInvoiceDate(invoiceDate);
+        if (gstAmount != null) billing.setGstAmount(gstAmount);
+        if (totalAmount != null) billing.setTotalAmount(totalAmount);
+        if (currency != null) billing.setCurrency(blankToNull(currency));
+        if (invoiceReference != null) billing.setInvoiceReference(blankToNull(invoiceReference));
+        if (serviceDetails != null) billing.setServiceDetails(blankToNull(serviceDetails));
 
         if (invoiceFile != null && !invoiceFile.isEmpty()) {
             deleteInvoiceFileQuietly(billing.getInvoicePath());
@@ -296,6 +316,10 @@ public class ServiceBillingService {
         } catch (IOException e) {
             log.warn("Could not delete old invoice file '{}': {}", storedName, e.getMessage());
         }
+    }
+
+    private String blankToNull(String value) {
+        return (value == null || value.isBlank()) ? null : value.trim();
     }
 
     private String requireText(String value, String label) {

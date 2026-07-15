@@ -44,6 +44,13 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.CONFLICT, "Conflict", ex.getMessage(), req);
     }
 
+    @ExceptionHandler(InvoiceExtractionException.class)
+    public ResponseEntity<ApiError> handleInvoiceExtraction(InvoiceExtractionException ex, HttpServletRequest req) {
+        // Expected/user-facing (bad or unreadable PDF) — not a system failure, so no ERROR-level noise.
+        log.debug("Invoice extraction failed at {}: {}", req.getRequestURI(), ex.getMessage());
+        return build(HttpStatus.UNPROCESSABLE_ENTITY, "Unprocessable Entity", ex.getMessage(), req);
+    }
+
     @ExceptionHandler(OtpException.class)
     public ResponseEntity<ApiError> handleOtp(OtpException ex, HttpServletRequest req) {
         log.debug("OTP failure at {}: {}", req.getRequestURI(), ex.getMessage());
