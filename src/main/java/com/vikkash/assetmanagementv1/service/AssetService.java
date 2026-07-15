@@ -31,13 +31,16 @@ public class AssetService {
     private final AssetRepository        assetRepository;
     private final EmployeeRepository     employeeRepository;
     private final AssetRequestRepository assetRequestRepository;
+    private final AuditLogService        auditLogService;
 
     public AssetService(AssetRepository assetRepository,
                         EmployeeRepository employeeRepository,
-                        AssetRequestRepository assetRequestRepository) {
+                        AssetRequestRepository assetRequestRepository,
+                        AuditLogService auditLogService) {
         this.assetRepository        = assetRepository;
         this.employeeRepository     = employeeRepository;
         this.assetRequestRepository = assetRequestRepository;
+        this.auditLogService        = auditLogService;
     }
 
     // ── Read ───────────────────────────────────────────────────────────────
@@ -114,7 +117,10 @@ public class AssetService {
         log.info("Creating new asset: type={} name={} serial={}",
                 asset.getAssetType(), asset.getLaptopName(), asset.getSerialNumber());
 
-        return assetRepository.save(asset);
+        Asset saved = assetRepository.save(asset);
+        auditLogService.record("ASSET", String.valueOf(saved.getAssetId()), "CREATED",
+                "Added asset '" + saved.getLaptopName() + "' (SN: " + saved.getSerialNumber() + ")");
+        return saved;
     }
 
     // ── Assign ─────────────────────────────────────────────────────────────
@@ -160,7 +166,11 @@ public class AssetService {
         asset.setEmailStatus("Not Sent");
 
         log.info("Asset {} assigned to employee {}", id, request.getEmployeeName());
-        return assetRepository.save(asset);
+        Asset saved = assetRepository.save(asset);
+        auditLogService.record("ASSET", String.valueOf(saved.getAssetId()), "ASSIGNED",
+                "Assigned '" + saved.getLaptopName() + "' to " + saved.getEmployeeName()
+                        + (saved.getEmployeeId() != null ? " (" + saved.getEmployeeId() + ")" : ""));
+        return saved;
     }
 
     /**
@@ -274,6 +284,10 @@ public class AssetService {
 
         log.info("repairOrphanedAssignments: repaired {} of {} assigned asset(s).",
                 repaired.size(), assignedAssets.size());
+        if (!repaired.isEmpty()) {
+            auditLogService.record("ASSET", "-", "REPAIRED",
+                    "Repaired " + repaired.size() + " orphaned asset assignment(s), reset to Available");
+        }
         return repaired;
     }
 
@@ -355,7 +369,10 @@ public class AssetService {
         }
 
         log.info("Asset {} updated", id);
-        return assetRepository.save(asset);
+        Asset saved = assetRepository.save(asset);
+        auditLogService.record("ASSET", String.valueOf(saved.getAssetId()), "UPDATED",
+                "Updated details for '" + saved.getLaptopName() + "'");
+        return saved;
     }
 
     // ── Return ─────────────────────────────────────────────────────────────
@@ -381,6 +398,8 @@ public class AssetService {
             asset.setAssetCondition(returnedCondition);
         }
 
+        String previousEmployeeName = asset.getEmployeeName();
+
         // Clear assignment fields
         asset.setEmployeeId(null);
         asset.setEmployeeName(null);
@@ -389,7 +408,11 @@ public class AssetService {
         asset.setEmailStatus("Not Sent");
 
         log.info("Asset {} returned. New status: {}", id, nextStatus);
-        return assetRepository.save(asset);
+        Asset saved = assetRepository.save(asset);
+        auditLogService.record("ASSET", String.valueOf(saved.getAssetId()), "RETURNED",
+                "'" + saved.getLaptopName() + "' returned by " + (previousEmployeeName != null ? previousEmployeeName : "unknown")
+                        + " → status set to " + nextStatus);
+        return saved;
     }
 
     // ── Relieve ────────────────────────────────────────────────────────────
@@ -399,17 +422,21 @@ public class AssetService {
         Asset asset = getById(id);
         asset.setRelievedStatus("Yes");
         asset.setRelievedDate(LocalDate.now().toString());
-        return assetRepository.save(asset);
+        Asset saved = assetRepository.save(asset);
+        auditLogService.record("ASSET", String.valueOf(saved.getAssetId()), "RELIEVED",
+                "Marked '" + saved.getLaptopName() + "' holder (" + saved.getEmployeeName() + ") as relieved");
+        return saved;
     }
 
     // ── Delete ─────────────────────────────────────────────────────────────
 
     @Transactional
     public void deleteAsset(Long id) {
-        if (!assetRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Asset not found with id: " + id);
-        }
+        Asset asset = assetRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Asset not found with id: " + id));
         log.warn("Deleting asset id={}", id);
         assetRepository.deleteById(id);
+        auditLogService.record("ASSET", String.valueOf(id), "DELETED",
+                "Deleted asset '" + asset.getLaptopName() + "' (SN: " + asset.getSerialNumber() + ")");
     }
 }

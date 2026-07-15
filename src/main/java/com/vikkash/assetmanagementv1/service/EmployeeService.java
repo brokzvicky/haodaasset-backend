@@ -33,15 +33,18 @@ public class EmployeeService {
     private final AssetRepository    assetRepository;
     private final PasswordEncoder    passwordEncoder;
     private final JwtUtil            jwtUtil;
+    private final AuditLogService    auditLogService;
 
     public EmployeeService(EmployeeRepository employeeRepository,
                            AssetRepository assetRepository,
                            PasswordEncoder passwordEncoder,
-                           JwtUtil jwtUtil) {
+                           JwtUtil jwtUtil,
+                           AuditLogService auditLogService) {
         this.employeeRepository = employeeRepository;
         this.assetRepository    = assetRepository;
         this.passwordEncoder    = passwordEncoder;
         this.jwtUtil            = jwtUtil;
+        this.auditLogService    = auditLogService;
     }
 
     // ── Authentication ─────────────────────────────────────────────────────
@@ -93,6 +96,7 @@ public class EmployeeService {
         employee.setMustChangePassword(false);
         employeeRepository.save(employee);
         log.info("Password changed for employee: {}", empId);
+        auditLogService.record("EMPLOYEE", empId, "PASSWORD_CHANGED", "Employee changed their own password");
     }
 
     // ── CRUD ───────────────────────────────────────────────────────────────
@@ -121,7 +125,10 @@ public class EmployeeService {
         employee.setMustChangePassword(true);  // force change on first login
 
         log.info("Created employee: {}", empId);
-        return employeeRepository.save(employee);
+        Employee saved = employeeRepository.save(employee);
+        auditLogService.record("EMPLOYEE", empId, "CREATED",
+                "Created employee " + employee.getEmployeeName() + " (" + empId + ")");
+        return saved;
     }
 
     @Transactional(readOnly = true)
@@ -183,16 +190,18 @@ public class EmployeeService {
             }
         }
 
+        auditLogService.record("EMPLOYEE", newEmployeeId, "UPDATED", "Updated employee " + saved.getEmployeeName() + " (" + newEmployeeId + ")");
         return saved;
     }
 
     @Transactional
     public void deleteEmployee(Long id) {
-        if (!employeeRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Employee not found with id: " + id);
-        }
+        Employee employee = employeeRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Employee not found with id: " + id));
         log.warn("Deleting employee id={}", id);
         employeeRepository.deleteById(id);
+        auditLogService.record("EMPLOYEE", employee.getEmployeeId(), "DELETED",
+                "Deleted employee " + employee.getEmployeeName() + " (" + employee.getEmployeeId() + ")");
     }
 
     /**
@@ -209,6 +218,7 @@ public class EmployeeService {
         employee.setMustChangePassword(true);   // ← was incorrectly false
         employeeRepository.save(employee);
         log.info("Password reset to default for employee: {}", employeeId);
+        auditLogService.record("EMPLOYEE", employeeId, "PASSWORD_RESET", "Admin reset password to default");
     }
 
     /** Returns all assets currently assigned to this employee. */

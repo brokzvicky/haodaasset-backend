@@ -4,6 +4,7 @@ import com.vikkash.assetmanagementv1.dto.AssetRequestStatusDTO;
 import com.vikkash.assetmanagementv1.entity.AssetRequest;
 import com.vikkash.assetmanagementv1.exception.ResourceNotFoundException;
 import com.vikkash.assetmanagementv1.repository.AssetRequestRepository;
+import com.vikkash.assetmanagementv1.service.AuditLogService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -27,9 +28,12 @@ import java.util.List;
 public class AssetRequestController {
 
     private final AssetRequestRepository assetRequestRepository;
+    private final AuditLogService auditLogService;
 
-    public AssetRequestController(AssetRequestRepository assetRequestRepository) {
+    public AssetRequestController(AssetRequestRepository assetRequestRepository,
+                                   AuditLogService auditLogService) {
         this.assetRequestRepository = assetRequestRepository;
+        this.auditLogService = auditLogService;
     }
 
     /** GET /api/admin/requests — list all requests, newest first. */
@@ -47,6 +51,9 @@ public class AssetRequestController {
 
         request.setStatus(dto.getStatus());
         request.setResolvedAt(LocalDateTime.now());
-        return ResponseEntity.ok(assetRequestRepository.save(request));
+        AssetRequest saved = assetRequestRepository.save(request);
+        auditLogService.record("ASSET_REQUEST", String.valueOf(id), dto.getStatus(),
+                dto.getStatus() + " request from " + saved.getEmployeeName() + " for " + saved.getAssetType());
+        return ResponseEntity.ok(saved);
     }
 }

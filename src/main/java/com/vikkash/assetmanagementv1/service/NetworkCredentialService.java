@@ -33,11 +33,14 @@ public class NetworkCredentialService {
 
     private final NetworkCredentialRepository repository;
     private final CredentialEncryptionUtil encryptionUtil;
+    private final AuditLogService auditLogService;
 
     public NetworkCredentialService(NetworkCredentialRepository repository,
-                                     CredentialEncryptionUtil encryptionUtil) {
+                                     CredentialEncryptionUtil encryptionUtil,
+                                     AuditLogService auditLogService) {
         this.repository = repository;
         this.encryptionUtil = encryptionUtil;
+        this.auditLogService = auditLogService;
     }
 
     // ── Read ───────────────────────────────────────────────────────────────
@@ -112,7 +115,10 @@ public class NetworkCredentialService {
         log.info("Creating network credential: device={} type={} createdBy={}",
                 entity.getDeviceName(), entity.getDeviceType(), createdBy);
 
-        return NetworkCredentialResponse.from(repository.save(entity));
+        NetworkCredential saved = repository.save(entity);
+        auditLogService.record("NETWORK_CREDENTIAL", String.valueOf(saved.getId()), "CREATED",
+                "Added device '" + saved.getDeviceName() + "' (" + saved.getDeviceType() + ")", createdBy);
+        return NetworkCredentialResponse.from(saved);
     }
 
     // ── Update ─────────────────────────────────────────────────────────────
@@ -138,7 +144,10 @@ public class NetworkCredentialService {
 
         log.info("Updated network credential id={} device={} updatedBy={}", id, entity.getDeviceName(), updatedBy);
 
-        return NetworkCredentialResponse.from(repository.save(entity));
+        NetworkCredential saved = repository.save(entity);
+        auditLogService.record("NETWORK_CREDENTIAL", String.valueOf(saved.getId()), "UPDATED",
+                "Updated device '" + saved.getDeviceName() + "'", updatedBy);
+        return NetworkCredentialResponse.from(saved);
     }
 
     private void applyCommonFields(NetworkCredential entity, String deviceName, String deviceType, String brand,
@@ -175,6 +184,8 @@ public class NetworkCredentialService {
         NetworkCredential entity = getEntityById(id);
         log.info("Password revealed for network credential id={} device={} by={}",
                 id, entity.getDeviceName(), requestedBy);
+        auditLogService.record("NETWORK_CREDENTIAL", String.valueOf(id), "PASSWORD_REVEALED",
+                "Login password revealed for device '" + entity.getDeviceName() + "'", requestedBy);
         return encryptionUtil.decrypt(entity.getEncryptedPassword());
     }
 
@@ -186,6 +197,8 @@ public class NetworkCredentialService {
         }
         log.info("Enable password revealed for network credential id={} device={} by={}",
                 id, entity.getDeviceName(), requestedBy);
+        auditLogService.record("NETWORK_CREDENTIAL", String.valueOf(id), "PASSWORD_REVEALED",
+                "Enable password revealed for device '" + entity.getDeviceName() + "'", requestedBy);
         return encryptionUtil.decrypt(entity.getEncryptedEnablePassword());
     }
 
@@ -193,10 +206,10 @@ public class NetworkCredentialService {
 
     @Transactional
     public void delete(Long id) {
-        if (!repository.existsById(id)) {
-            throw new ResourceNotFoundException("Network credential not found with id: " + id);
-        }
+        NetworkCredential entity = getEntityById(id);
         log.warn("Deleting network credential id={}", id);
         repository.deleteById(id);
+        auditLogService.record("NETWORK_CREDENTIAL", String.valueOf(id), "DELETED",
+                "Deleted device '" + entity.getDeviceName() + "'");
     }
 }

@@ -12,7 +12,6 @@ import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.springframework.stereotype.Service;
-import java.awt.Color;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -175,12 +174,12 @@ public class ReportService {
 
         void writeTableHeader() throws IOException {
             float[] cols = columnPositions();
-            stream.setNonStrokingColor(new Color(90, 90, 90));
+            stream.setNonStrokingColor(90, 90, 90);
             writeAt("ASSET", fontBold, 8, cols[0]);
             writeAt("BRAND / MODEL", fontBold, 8, cols[1]);
             writeAt("SERIAL NO.", fontBold, 8, cols[2]);
             writeAt("STATUS", fontBold, 8, cols[3]);
-            stream.setNonStrokingColor(Color.BLACK);
+            stream.setNonStrokingColor(0, 0, 0);
             y -= 12;
             drawRule();
             y -= 2;
@@ -224,11 +223,12 @@ public class ReportService {
 
         private void drawRule() throws IOException {
             stream.setLineWidth(0.5f);
-            stream.setStrokingColor(new Color(210, 210, 210));
+            stream.setStrokingColor(210, 210, 210);
             stream.moveTo(MARGIN_LEFT, y);
             stream.lineTo(MARGIN_LEFT + CONTENT_WIDTH, y);
             stream.stroke();
-            stream.setStrokingColor(Color.BLACK);        }
+            stream.setStrokingColor(0, 0, 0);
+        }
 
         void close() throws IOException {
             if (stream != null) {
