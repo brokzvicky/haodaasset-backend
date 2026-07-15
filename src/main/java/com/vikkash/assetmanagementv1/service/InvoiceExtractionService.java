@@ -3,6 +3,7 @@ package com.vikkash.assetmanagementv1.service;
 import com.vikkash.assetmanagementv1.dto.InvoiceExtractionResult;
 import com.vikkash.assetmanagementv1.exception.InvoiceExtractionException;
 import net.sourceforge.tess4j.Tesseract;
+import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -80,7 +81,7 @@ public class InvoiceExtractionService {
 
         String text;
         boolean ocrUsed = false;
-        try (PDDocument doc = PDDocument.load(file.getBytes())) {
+        try (PDDocument doc = Loader.loadPDF(file.getBytes())) {
             text = new PDFTextStripper().getText(doc);
 
             if (text == null || text.trim().length() < MIN_TEXT_LENGTH) {

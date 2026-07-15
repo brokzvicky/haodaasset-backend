@@ -28,12 +28,13 @@ import java.util.List;
  * whatever the admin currently has on screen.
  *
  * Requires the following Maven dependencies (mirrors the note on
- * ReportService for PDFBox; poi-ooxml additionally needed for the Excel
- * export — add to pom.xml if not already present):
+ * ReportService for PDFBox — this project's pom.xml uses PDFBox 3.x;
+ * poi-ooxml additionally needed for the Excel export — add to pom.xml if
+ * not already present):
  *   <dependency>
  *     <groupId>org.apache.pdfbox</groupId>
  *     <artifactId>pdfbox</artifactId>
- *     <version>2.0.31</version>
+ *     <version>3.0.3</version>
  *   </dependency>
  *   <dependency>
  *     <groupId>org.apache.poi</groupId>
@@ -49,8 +50,11 @@ public class ServiceBillingReportService {
     private static final float MARGIN_LEFT   = 40f;
     private static final float MARGIN_TOP    = 50f;
     private static final float MARGIN_BOTTOM = 45f;
-    private static final float PAGE_WIDTH    = PDRectangle.A4.rotate().getWidth();
-    private static final float PAGE_HEIGHT   = PDRectangle.A4.rotate().getHeight();
+    // PDRectangle has no rotate() method — build the landscape A4 rectangle
+    // manually by swapping width/height instead.
+    private static final PDRectangle A4_LANDSCAPE = new PDRectangle(PDRectangle.A4.getHeight(), PDRectangle.A4.getWidth());
+    private static final float PAGE_WIDTH    = A4_LANDSCAPE.getWidth();
+    private static final float PAGE_HEIGHT   = A4_LANDSCAPE.getHeight();
 
     // ── PDF export ───────────────────────────────────────────────────────────
 
@@ -93,7 +97,7 @@ public class ServiceBillingReportService {
 
         void newPage() throws IOException {
             if (stream != null) stream.close();
-            PDPage page = new PDPage(PDRectangle.A4.rotate());
+            PDPage page = new PDPage(A4_LANDSCAPE);
             document.addPage(page);
             stream = new PDPageContentStream(document, page);
             y = PAGE_HEIGHT - MARGIN_TOP;

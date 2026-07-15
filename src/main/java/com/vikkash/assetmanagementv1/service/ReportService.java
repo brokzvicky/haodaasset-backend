@@ -31,11 +31,12 @@ import java.util.List;
  * enough that manual positioning is easier to reason about and review than
  * a templating dependency would be.
  *
- * Requires the following Maven dependency (not bundled — add to pom.xml):
+ * Requires the following Maven dependency (not bundled — add to pom.xml
+ * if not already present; this project's pom.xml uses PDFBox 3.x):
  *   <dependency>
  *     <groupId>org.apache.pdfbox</groupId>
  *     <artifactId>pdfbox</artifactId>
- *     <version>2.0.31</version>
+ *     <version>3.0.3</version>
  *   </dependency>
  */
 @Service
