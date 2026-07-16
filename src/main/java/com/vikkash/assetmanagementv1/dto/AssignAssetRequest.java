@@ -4,13 +4,21 @@ import jakarta.validation.constraints.NotBlank;
 
 /**
  * Payload for PUT /assets/assign/{id}.
- * employeeName is the minimum required field; the rest add audit context.
+ *
+ * employeeId is the only field the backend actually trusts to identify who
+ * the asset is being assigned to. employeeName, employeeRole, and location
+ * are accepted for backward compatibility with older/alternate callers but
+ * are IGNORED by the service — AssetService.assignAsset looks the employee
+ * up by employeeId and copies employeeName/employeeRole/location straight
+ * from the Employee table, so the asset and the employee record can never
+ * disagree about where that person (and therefore their equipment) is.
  */
 public class AssignAssetRequest {
 
+    @NotBlank(message = "Employee ID is required to assign an asset")
     private String employeeId;
 
-    @NotBlank(message = "Employee name is required for assignment")
+    /** Accepted but ignored — the employee's current name is read from the Employee table instead. */
     private String employeeName;
 
     private String employeeRole;

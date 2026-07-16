@@ -164,12 +164,25 @@ public class AssetService {
                             + "' and cannot be assigned. Only Available assets can be assigned.");
         }
 
-        // Guard: verify the employee exists in the employee table if an ID is given
-        if (request.getEmployeeId() != null && !request.getEmployeeId().isBlank()) {
-            if (!employeeRepository.existsByEmployeeId(request.getEmployeeId().trim().toUpperCase())) {
-                throw new ResourceNotFoundException(
-                        "Employee not found with ID: " + request.getEmployeeId());
-            }
+        // Guard: an employee must be identified — everything about *who* the asset
+        // is assigned to (name, role, location) is now sourced from the Employee
+        // table itself, so we can no longer proceed without a real employee record.
+        if (request.getEmployeeId() == null || request.getEmployeeId().isBlank()) {
+            throw new IllegalArgumentException("An employee ID is required to assign an asset.");
+        }
+        String normalizedEmployeeId = request.getEmployeeId().trim().toUpperCase();
+        Employee employee = employeeRepository.findByEmployeeId(normalizedEmployeeId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Employee not found with ID: " + request.getEmployeeId()));
+
+        // Guard: the employee's own location must be set before we can copy it
+        // onto the asset — otherwise we'd silently create an asset with no
+        // location, which is exactly the kind of drift this fix is meant to
+        // eliminate. Fail loudly here instead of writing bad data.
+        if (employee.getLocation() == null || employee.getLocation().isBlank()) {
+            throw new IllegalArgumentException(
+                    "Employee " + employee.getEmployeeName() + " (" + employee.getEmployeeId()
+                            + ") has no location set. Please update their location before assigning an asset.");
         }
 
         // Guard: assignment type must be Permanent or Temporary, and Temporary
@@ -188,14 +201,21 @@ public class AssetService {
             }
         }
 
-        asset.setEmployeeId(
-                request.getEmployeeId() != null && !request.getEmployeeId().isBlank()
-                        ? request.getEmployeeId().trim().toUpperCase()
-                        : null
+        // ── Source of truth: the Employee table, never the request body ──────
+        // Any employeeName / employeeRole / location the frontend sent is
+        // ignored from this point on. This is what keeps the Employees page
+        // and the Asset Inventory page from ever showing two different
+        // locations for the same person again — both now read from (or,
+        // in the asset's case, are copied at assignment time from) the same
+        // Employee row.
+        asset.setEmployeeId(employee.getEmployeeId());
+        asset.setEmployeeName(employee.getEmployeeName());
+        asset.setEmployeeRole(
+                (employee.getDesignation() != null && !employee.getDesignation().isBlank())
+                        ? employee.getDesignation()
+                        : employee.getRole()
         );
-        asset.setEmployeeName(request.getEmployeeName());
-        asset.setEmployeeRole(request.getEmployeeRole());
-        asset.setLocation(request.getLocation() != null ? request.getLocation() : asset.getLocation());
+        asset.setLocation(employee.getLocation());
         String effectiveAssignedDate = request.getAssignedDate() != null
                 ? request.getAssignedDate()
                 : LocalDate.now().toString();
@@ -232,7 +252,7 @@ public class AssetService {
             asset.setTemporaryReturnReminderSent("No");
         }
 
-        log.info("Asset {} assigned to employee {} ({})", id, request.getEmployeeName(), asset.getAssignmentType());
+        log.info("Asset {} assigned to employee {} ({})", id, employee.getEmployeeName(), asset.getAssignmentType());
         Asset saved = assetRepository.save(asset);
         String auditNote = "Assigned '" + saved.getLaptopName() + "' to " + saved.getEmployeeName()
                 + (saved.getEmployeeId() != null ? " (" + saved.getEmployeeId() + ")" : "")

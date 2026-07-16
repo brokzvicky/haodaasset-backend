@@ -181,13 +181,51 @@ public class EmployeeService {
             List<Asset> ownedAssets = assetRepository.findByEmployeeId(oldEmployeeId);
             for (Asset asset : ownedAssets) {
                 asset.setEmployeeId(newEmployeeId);
-                asset.setEmployeeName(saved.getEmployeeName()); // keep display name in sync too
             }
             if (!ownedAssets.isEmpty()) {
                 assetRepository.saveAll(ownedAssets);
                 log.info("Employee ID changed {} -> {}: relinked {} asset(s) to the new ID.",
                         oldEmployeeId, newEmployeeId, ownedAssets.size());
             }
+        }
+
+        // CASCADE: the Employee table is the single source of truth for name,
+        // role, and — critically — location. Whenever any of those change
+        // here (not just on an employeeId rename), every asset currently
+        // assigned to this person must be updated to match, or the Employees
+        // page and the Asset Inventory page will disagree about where that
+        // person (and their equipment) is located until the asset happens to
+        // be reassigned again.
+        List<Asset> currentlyAssigned = assetRepository.findByEmployeeId(newEmployeeId);
+        String syncedRole = (saved.getDesignation() != null && !saved.getDesignation().isBlank())
+                ? saved.getDesignation()
+                : saved.getRole();
+        boolean anyChanged = false;
+        for (Asset asset : currentlyAssigned) {
+            boolean changed = false;
+            if (!java.util.Objects.equals(asset.getEmployeeName(), saved.getEmployeeName())) {
+                asset.setEmployeeName(saved.getEmployeeName());
+                changed = true;
+            }
+            if (!java.util.Objects.equals(asset.getEmployeeRole(), syncedRole)) {
+                asset.setEmployeeRole(syncedRole);
+                changed = true;
+            }
+            if (!java.util.Objects.equals(asset.getLocation(), saved.getLocation())) {
+                asset.setLocation(saved.getLocation());
+                changed = true;
+            }
+            anyChanged = anyChanged || changed;
+        }
+        if (!currentlyAssigned.isEmpty()) {
+            assetRepository.saveAll(currentlyAssigned);
+        }
+        if (anyChanged) {
+            log.info("Employee {} updated: synced name/role/location onto {} assigned asset(s).",
+                    newEmployeeId, currentlyAssigned.size());
+            auditLogService.record("EMPLOYEE", newEmployeeId, "SYNCED_ASSETS",
+                    "Propagated updated name/role/location to " + currentlyAssigned.size()
+                            + " asset(s) assigned to " + saved.getEmployeeName());
         }
 
         auditLogService.record("EMPLOYEE", newEmployeeId, "UPDATED", "Updated employee " + saved.getEmployeeName() + " (" + newEmployeeId + ")");
