@@ -469,15 +469,42 @@ public class AssetService {
             asset.setRemarks(updatedAsset.getRemarks());
         }
 
-        // Update condition and possibly status based on it
+        // Update condition and possibly status based on it.
+        //
+        // BUG FIX: the Faulty/Damaged branches used to unconditionally overwrite
+        // assetStatus, even when the asset was currently "Assigned" to an
+        // employee. Since this endpoint (PUT /assets/{id}) is also what the
+        // Asset Inventory page's inline "change condition" control calls,
+        // simply flagging an assigned asset's condition as Faulty/Damaged would
+        // silently strip its "Assigned" status — while employeeId/employeeName/
+        // assignedDate were left untouched. The result: the Employee page
+        // (which matches purely on employeeId) still correctly listed the
+        // asset as assigned to that employee, but the Assets Inventory page's
+        // Status column showed "Faulty"/"Under Repair" instead of "Assigned"
+        // for that same asset — an inconsistent, incorrect display for exactly
+        // those employees whose assigned asset had its condition edited this way.
+        // The New/Excellent/Good/Fair branches already guarded against this
+        // (see "Only make Available if not currently assigned" below); Faulty
+        // and Damaged now use the identical guard for consistency.
         if (updatedAsset.getAssetCondition() != null) {
             asset.setAssetCondition(updatedAsset.getAssetCondition());
+            boolean conditionImpliesOutOfService =
+                    "Faulty".equals(updatedAsset.getAssetCondition()) || "Damaged".equals(updatedAsset.getAssetCondition());
+            if (conditionImpliesOutOfService && "Assigned".equals(asset.getAssetStatus())) {
+                log.info("Asset {} condition set to '{}' while still Assigned to employeeId={} — "
+                                + "status kept as 'Assigned' (not auto-changed); return the asset first if it needs to leave service.",
+                        id, updatedAsset.getAssetCondition(), asset.getEmployeeId());
+            }
             switch (updatedAsset.getAssetCondition()) {
                 case "Faulty":
-                    asset.setAssetStatus("Faulty");
+                    if (!"Assigned".equals(asset.getAssetStatus())) {
+                        asset.setAssetStatus("Faulty");
+                    }
                     break;
                 case "Damaged":
-                    asset.setAssetStatus("Under Repair");
+                    if (!"Assigned".equals(asset.getAssetStatus())) {
+                        asset.setAssetStatus("Under Repair");
+                    }
                     break;
                 case "New":
                 case "Excellent":
