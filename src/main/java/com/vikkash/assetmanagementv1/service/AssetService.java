@@ -4,6 +4,7 @@ import com.vikkash.assetmanagementv1.dto.AssignAssetRequest;
 import com.vikkash.assetmanagementv1.dto.OrphanedAssetDTO;
 import com.vikkash.assetmanagementv1.dto.RepairResultDTO;
 import com.vikkash.assetmanagementv1.entity.Asset;
+import com.vikkash.assetmanagementv1.entity.Employee;
 import com.vikkash.assetmanagementv1.exception.DuplicateResourceException;
 import com.vikkash.assetmanagementv1.exception.ResourceNotFoundException;
 import com.vikkash.assetmanagementv1.repository.AssetRepository;
@@ -34,6 +35,7 @@ public class AssetService {
     private final AssetRequestRepository assetRequestRepository;
     private final AuditLogService        auditLogService;
     private final EmailService           emailService;
+    private final AssetEmailService      assetEmailService;
 
     // Fixed inbox that every "asset assigned" admin notification goes to,
     // regardless of which admin performed the assignment — same pattern as
@@ -45,12 +47,14 @@ public class AssetService {
                         EmployeeRepository employeeRepository,
                         AssetRequestRepository assetRequestRepository,
                         AuditLogService auditLogService,
-                        EmailService emailService) {
+                        EmailService emailService,
+                        AssetEmailService assetEmailService) {
         this.assetRepository        = assetRepository;
         this.employeeRepository     = employeeRepository;
         this.assetRequestRepository = assetRequestRepository;
         this.auditLogService        = auditLogService;
         this.emailService           = emailService;
+        this.assetEmailService      = assetEmailService;
     }
 
     // ── Read ───────────────────────────────────────────────────────────────
@@ -499,6 +503,23 @@ public class AssetService {
 
     @Transactional
     public Asset returnAsset(Long id, Map<String, String> body) {
+        return returnAsset(id, body, false, null);
+    }
+
+    /**
+     * @param sendReturnEmail whether to send the "Asset Return Confirmation" email
+     *                        to the employee as part of this return. When true, the
+     *                        email is sent BEFORE the asset's employee link is cleared
+     *                        (below), since that link — and the employee's name/email —
+     *                        no longer resolve once the return completes. If the send
+     *                        fails, the exception propagates and this whole transaction
+     *                        rolls back, so the return is not silently completed without
+     *                        the employee being notified.
+     * @param sentByAdmin     admin username performing the return (may be null), recorded
+     *                        on the email log the same way sendAssignmentEmail does.
+     */
+    @Transactional
+    public Asset returnAsset(Long id, Map<String, String> body, boolean sendReturnEmail, String sentByAdmin) {
         Asset asset = getById(id);
 
         if (!"Assigned".equals(asset.getAssetStatus())) {
@@ -510,9 +531,22 @@ public class AssetService {
                 ? body.get("assetStatus") : "Available";
         String returnedCondition = (body != null && body.get("condition") != null)
                 ? body.get("condition") : null;
+        String returnDate = LocalDate.now().toString();
+
+        if (sendReturnEmail) {
+            String employeeId = asset.getEmployeeId();
+            if (employeeId == null || employeeId.isBlank()) {
+                throw new IllegalArgumentException(
+                        "This asset has no linked employee record, so no return email can be sent.");
+            }
+            Employee employee = employeeRepository.findByEmployeeId(employeeId)
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Employee not found with ID: " + employeeId));
+            assetEmailService.sendReturnEmail(asset, employee, sentByAdmin, returnDate);
+        }
 
         asset.setReturnedStatus("Yes");
-        asset.setReturnDate(LocalDate.now().toString());
+        asset.setReturnDate(returnDate);
         asset.setAssetStatus(nextStatus);
         if (returnedCondition != null) {
             asset.setAssetCondition(returnedCondition);
@@ -539,7 +573,8 @@ public class AssetService {
         Asset saved = assetRepository.save(asset);
         auditLogService.record("ASSET", String.valueOf(saved.getAssetId()), "RETURNED",
                 "'" + saved.getLaptopName() + "' returned by " + (previousEmployeeName != null ? previousEmployeeName : "unknown")
-                        + " → status set to " + nextStatus);
+                        + " → status set to " + nextStatus
+                        + (sendReturnEmail ? " (return email sent)" : ""));
         return saved;
     }
 

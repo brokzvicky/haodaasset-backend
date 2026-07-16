@@ -32,6 +32,13 @@ public class AssetEmailLog {
     @Column(name = "employee_email")
     private String employeeEmail;
 
+    /**
+     * One of: ASSIGNMENT, RETURN. Defaults to ASSIGNMENT so existing rows
+     * (written before this column existed) still read back correctly.
+     */
+    @Column(name = "email_type", length = 20)
+    private String emailType = "ASSIGNMENT";
+
     /** Admin username who triggered the send (from JWT subject). */
     @Column(name = "sent_by_admin")
     private String sentByAdmin;
@@ -60,6 +67,9 @@ public class AssetEmailLog {
 
     public String getEmployeeEmail() { return employeeEmail; }
     public void setEmployeeEmail(String employeeEmail) { this.employeeEmail = employeeEmail; }
+
+    public String getEmailType() { return emailType; }
+    public void setEmailType(String emailType) { this.emailType = emailType; }
 
     public String getSentByAdmin() { return sentByAdmin; }
     public void setSentByAdmin(String sentByAdmin) { this.sentByAdmin = sentByAdmin; }

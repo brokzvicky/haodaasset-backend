@@ -20,13 +20,14 @@ public class AssetEmailLogResponse {
     private Instant sentAt;
     private String status;
     private String errorMessage;
+    private String emailType;
 
     public AssetEmailLogResponse() {
     }
 
     public AssetEmailLogResponse(Long id, Long assetId, String assetLabel, String employeeId,
                                   String employeeName, String employeeEmail, String sentByAdmin,
-                                  Instant sentAt, String status, String errorMessage) {
+                                  Instant sentAt, String status, String errorMessage, String emailType) {
         this.id = id;
         this.assetId = assetId;
         this.assetLabel = assetLabel;
@@ -37,6 +38,7 @@ public class AssetEmailLogResponse {
         this.sentAt = sentAt;
         this.status = status;
         this.errorMessage = errorMessage;
+        this.emailType = emailType;
     }
 
     public Long getId() { return id; }
@@ -68,4 +70,7 @@ public class AssetEmailLogResponse {
 
     public String getErrorMessage() { return errorMessage; }
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
+
+    public String getEmailType() { return emailType; }
+    public void setEmailType(String emailType) { this.emailType = emailType; }
 }

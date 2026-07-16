@@ -88,17 +88,65 @@ public class AssetEmailService {
             emailService.sendAssetAssignmentEmail(
                     employee.getEmail(), employee.getEmployeeName(), employee.getEmployeeId(), details);
 
-            saveLog(asset, employee, sentByAdmin, "SENT", null);
+            saveLog(asset, employee, sentByAdmin, "SENT", null, "ASSIGNMENT");
             asset.setEmailStatus("Sent");
             log.info("Assignment email sent for asset {} to employee {}", assetId, employee.getEmployeeId());
             return assetRepository.save(asset);
 
         } catch (EmailDeliveryException ex) {
-            saveLog(asset, employee, sentByAdmin, "FAILED", ex.getMessage());
+            saveLog(asset, employee, sentByAdmin, "FAILED", ex.getMessage(), "ASSIGNMENT");
             asset.setEmailStatus("Failed");
             assetRepository.save(asset);
             log.error("Assignment email failed for asset {} to employee {}: {}",
                     assetId, employee.getEmployeeId(), ex.getMessage());
+            throw ex;
+        }
+    }
+
+    /**
+     * Sends the "Asset Return Confirmation" email for an asset that is about to
+     * be returned. Unlike sendAssignmentEmail (which re-reads the asset by id),
+     * this takes the already-loaded Asset and Employee directly: the caller
+     * (AssetService.returnAsset) must invoke this BEFORE it clears the asset's
+     * employee link, since that link no longer exists once the return completes.
+     * Reuses the same EmailService call and asset_email_logs logging as the
+     * assignment email — only the template and log's emailType differ.
+     *
+     * @param asset        the asset being returned (still linked to its employee)
+     * @param employee     the employee returning the asset
+     * @param sentByAdmin  admin username who triggered the return (may be null)
+     * @param returnDate   the return date to render into the email (yyyy-MM-dd)
+     * @throws EmailDeliveryException on failure (after logging it), so the caller's
+     *                                transaction can roll back the return itself.
+     */
+    @Transactional
+    public void sendReturnEmail(Asset asset, Employee employee, String sentByAdmin, String returnDate) {
+        if (employee.getEmail() == null || employee.getEmail().isBlank()) {
+            throw new IllegalArgumentException(
+                    "Employee '" + employee.getEmployeeName() + "' has no email address on file.");
+        }
+
+        EmailService.AssetReturnEmailDetails details = new EmailService.AssetReturnEmailDetails(
+                asset.getAssetId(),
+                asset.getLaptopName(),
+                asset.getAssetType(),
+                String.valueOf(asset.getAssetId()),
+                asset.getSerialNumber(),
+                asset.getBrand(),
+                asset.getModel(),
+                returnDate
+        );
+
+        try {
+            emailService.sendAssetReturnEmail(
+                    employee.getEmail(), employee.getEmployeeName(), employee.getEmployeeId(), details);
+
+            saveLog(asset, employee, sentByAdmin, "SENT", null, "RETURN");
+            log.info("Return email sent for asset {} to employee {}", asset.getAssetId(), employee.getEmployeeId());
+        } catch (EmailDeliveryException ex) {
+            saveLog(asset, employee, sentByAdmin, "FAILED", ex.getMessage(), "RETURN");
+            log.error("Return email failed for asset {} to employee {}: {}",
+                    asset.getAssetId(), employee.getEmployeeId(), ex.getMessage());
             throw ex;
         }
     }
@@ -110,7 +158,8 @@ public class AssetEmailService {
                 .toList();
     }
 
-    private void saveLog(Asset asset, Employee employee, String sentByAdmin, String status, String errorMessage) {
+    private void saveLog(Asset asset, Employee employee, String sentByAdmin, String status,
+                          String errorMessage, String emailType) {
         AssetEmailLog logEntry = new AssetEmailLog();
         logEntry.setAssetId(asset.getAssetId());
         logEntry.setEmployeeId(employee.getEmployeeId());
@@ -118,6 +167,7 @@ public class AssetEmailService {
         logEntry.setSentByAdmin(sentByAdmin);
         logEntry.setStatus(status);
         logEntry.setErrorMessage(errorMessage);
+        logEntry.setEmailType(emailType);
         emailLogRepository.save(logEntry);
     }
 
@@ -142,7 +192,8 @@ public class AssetEmailService {
                 logEntry.getSentByAdmin(),
                 logEntry.getSentAt(),
                 logEntry.getStatus(),
-                logEntry.getErrorMessage()
+                logEntry.getErrorMessage(),
+                logEntry.getEmailType()
         );
     }
 }

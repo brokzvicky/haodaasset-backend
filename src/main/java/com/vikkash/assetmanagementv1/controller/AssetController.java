@@ -120,10 +120,22 @@ public class AssetController {
         return ResponseEntity.ok(Map.of("remindersSent", sent));
     }
 
+    /**
+     * Returns an asset. If the request body includes "sendReturnEmail": "true",
+     * the "Asset Return Confirmation" email is sent to the employee as part of
+     * this same call (see AssetService.returnAsset) — same "ask, then act"
+     * pattern the frontend already uses for the assignment email, just
+     * collapsed into a single request since the employee link is cleared by
+     * the return itself. The admin identity is taken from the JWT subject,
+     * never from the request body.
+     */
     @PutMapping("/return/{id}")
     public ResponseEntity<Asset> returnAsset(@PathVariable Long id,
-                                              @RequestBody(required = false) Map<String, String> body) {
-        return ResponseEntity.ok(assetService.returnAsset(id, body));
+                                              @RequestBody(required = false) Map<String, String> body,
+                                              Authentication authentication) {
+        boolean sendReturnEmail = body != null && "true".equalsIgnoreCase(body.get("sendReturnEmail"));
+        String sentBy = authentication != null ? authentication.getName() : null;
+        return ResponseEntity.ok(assetService.returnAsset(id, body, sendReturnEmail, sentBy));
     }
 
     @PutMapping("/relieve/{id}")

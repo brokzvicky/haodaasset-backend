@@ -488,6 +488,155 @@ public class EmailService {
                 );
     }
 
+    /** Immutable bag of asset fields needed to render the "Asset Return Confirmation" email. */
+    public record AssetReturnEmailDetails(
+            Long assetId,
+            String assetName,
+            String assetType,
+            String assetTag,
+            String serialNumber,
+            String brand,
+            String model,
+            String returnDate
+    ) {}
+
+    /**
+     * Sends the "Asset Return Confirmation" notification email to an employee,
+     * confirming which asset was returned and when. Mirrors sendAssetAssignmentEmail
+     * in structure — same Brevo REST call, same sender config, same error handling.
+     *
+     * @param to           employee's email address
+     * @param employeeName employee's display name
+     * @param employeeId   employee's business ID, e.g. EMP002
+     * @param assetDetails asset fields to render into the email body
+     */
+    public void sendAssetReturnEmail(String to, String employeeName, String employeeId,
+                                      AssetReturnEmailDetails assetDetails) {
+        try {
+            ObjectNode root = objectMapper.createObjectNode();
+
+            ObjectNode sender = root.putObject("sender");
+            sender.put("name", fromName);
+            sender.put("email", fromAddress);
+
+            ObjectNode recipient = objectMapper.createObjectNode();
+            recipient.put("email", to);
+            recipient.put("name", employeeName);
+            root.putArray("to").add(recipient);
+
+            root.put("subject", "Asset Return Confirmation");
+            root.put("htmlContent", buildAssetReturnHtml(employeeName, employeeId, assetDetails));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("api-key", brevoApiKey);
+            headers.set("accept", "application/json");
+
+            HttpEntity<String> request = new HttpEntity<>(objectMapper.writeValueAsString(root), headers);
+
+            restTemplate.postForEntity(BREVO_API_URL, request, String.class);
+            log.info("Asset return email sent via Brevo API: asset={} to={}",
+                    assetDetails.assetName(), maskEmail(to));
+        } catch (ResourceAccessException ex) {
+            log.error("Network error calling Brevo API for asset return email to {}: {}",
+                    maskEmail(to), ex.getMessage());
+            throw new EmailDeliveryException(
+                    "Couldn't send the return email right now. Please try again in a moment.", ex);
+        } catch (RestClientException ex) {
+            HttpStatusCode status = extractStatus(ex);
+            log.error("Brevo API rejected asset return email to {} (status={}): {}",
+                    maskEmail(to), status, ex.getMessage());
+            throw new EmailDeliveryException(
+                    "Couldn't send the return email right now. Please try again in a moment.", ex);
+        } catch (Exception ex) {
+            log.error("Unexpected failure sending asset return email to {}: {}", maskEmail(to), ex.getMessage());
+            throw new EmailDeliveryException(
+                    "Couldn't send the return email right now. Please try again in a moment.", ex);
+        }
+    }
+
+    private String buildAssetReturnHtml(String employeeName, String employeeId, AssetReturnEmailDetails a) {
+        return """
+                <!DOCTYPE html>
+                <html>
+                <body style="margin:0;padding:0;background:#f1f5f9;font-family:'Segoe UI',Arial,sans-serif;">
+                  <table width="100%%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:32px 0;">
+                    <tr><td align="center">
+                      <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,0.08);">
+                        <tr>
+                          <td style="background:linear-gradient(135deg,#334155,#64748b);padding:28px 32px;">
+                            <table cellpadding="0" cellspacing="0"><tr>
+                              <td style="width:38px;height:38px;background:#ffffff;border-radius:9px;text-align:center;vertical-align:middle;font-weight:800;color:#334155;font-size:15px;">H</td>
+                              <td style="padding-left:12px;">
+                                <div style="color:#ffffff;font-size:18px;font-weight:700;letter-spacing:0.3px;">Haoda</div>
+                                <div style="color:#e2e8f0;font-size:12.5px;margin-top:1px;">Enterprise IT Asset Management</div>
+                              </td>
+                            </tr></table>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style="padding:32px;">
+                            <div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:6px;">Hi %s,</div>
+                            <p style="font-size:13.5px;color:#475569;line-height:1.6;margin:0 0 22px;">
+                              This confirms that the following asset has been returned and removed from your
+                              assignment. Thank you for taking care of it.
+                            </p>
+
+                            <table width="100%%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:18px;">
+                              <tr><td style="padding:16px 18px;">
+                                <div style="font-size:15px;font-weight:700;color:#334155;margin-bottom:10px;">%s</div>
+                                <table width="100%%" cellpadding="0" cellspacing="0" style="font-size:12.5px;color:#334155;">
+                                  <tr><td style="padding:3px 0;color:#64748b;width:130px;">Asset Type</td><td style="padding:3px 0;font-weight:600;">%s</td></tr>
+                                  <tr><td style="padding:3px 0;color:#64748b;">Asset Tag</td><td style="padding:3px 0;font-weight:600;">%s</td></tr>
+                                  <tr><td style="padding:3px 0;color:#64748b;">Brand</td><td style="padding:3px 0;font-weight:600;">%s</td></tr>
+                                  <tr><td style="padding:3px 0;color:#64748b;">Model</td><td style="padding:3px 0;font-weight:600;">%s</td></tr>
+                                  <tr><td style="padding:3px 0;color:#64748b;">Serial Number</td><td style="padding:3px 0;font-weight:600;">%s</td></tr>
+                                  <tr><td style="padding:3px 0;color:#64748b;">Return Date</td><td style="padding:3px 0;font-weight:600;">%s</td></tr>
+                                </table>
+                              </td></tr>
+                            </table>
+
+                            <table width="100%%" cellpadding="0" cellspacing="0" style="background:#f0f7ff;border:1px solid #bfdbfe;border-radius:10px;margin-bottom:6px;">
+                              <tr><td style="padding:14px 18px;">
+                                <div style="font-size:12px;font-weight:700;color:#0f172a;margin-bottom:6px;">Returned By</div>
+                                <table width="100%%" cellpadding="0" cellspacing="0" style="font-size:12.5px;color:#334155;">
+                                  <tr><td style="padding:2px 0;color:#64748b;width:130px;">Name</td><td style="padding:2px 0;font-weight:600;">%s</td></tr>
+                                  <tr><td style="padding:2px 0;color:#64748b;">Employee ID</td><td style="padding:2px 0;font-weight:600;">%s</td></tr>
+                                </table>
+                              </td></tr>
+                            </table>
+
+                            <p style="font-size:12.5px;color:#64748b;line-height:1.6;margin:20px 0 4px;">
+                              Questions about this return? Contact <strong>IT Support</strong> at
+                              <a href="mailto:it-support@haodapayments.com" style="color:#334155;text-decoration:none;">it-support@haodapayments.com</a>.
+                            </p>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style="padding:18px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;">
+                            <div style="font-size:11px;color:#94a3b8;">
+                              This is an automated message from Haoda Asset. Please do not reply directly to this email.
+                            </div>
+                            <div style="font-size:11px;color:#cbd5e1;margin-top:4px;">
+                              © %d Haoda Payments. All rights reserved.
+                            </div>
+                          </td>
+                        </tr>
+                      </table>
+                    </td></tr>
+                  </table>
+                </body>
+                </html>
+                """.formatted(
+                        employeeName,
+                        a.assetName(), nullSafe(a.assetType()), nullSafe(a.assetTag()),
+                        nullSafe(a.brand()), nullSafe(a.model()), nullSafe(a.serialNumber()),
+                        nullSafe(a.returnDate()),
+                        employeeName, employeeId,
+                        java.time.Year.now().getValue()
+                );
+    }
+
     /** Immutable bag of asset fields needed to render the assignment email. */
     public record AssetAssignmentEmailDetails(
             Long assetId,
