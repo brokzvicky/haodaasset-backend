@@ -973,4 +973,67 @@ public class EmailService {
         if (at <= 1) return "***";
         return email.charAt(0) + "***" + email.substring(at);
     }
+
+    /**
+     * Sends a simple, generically-styled notification email — used by the
+     * Warranty Expiry and Maintenance Due reminder schedulers, which don't
+     * need the richer per-asset templates above (just a heading + a few
+     * lines of body text).
+     *
+     * @param to      recipient address
+     * @param subject email subject line
+     * @param heading short bold heading shown at the top of the email body
+     * @param bodyHtml pre-escaped HTML paragraph(s) making up the message body
+     */
+    public void sendSimpleNotificationEmail(String to, String subject, String heading, String bodyHtml) {
+        try {
+            ObjectNode root = objectMapper.createObjectNode();
+
+            ObjectNode sender = root.putObject("sender");
+            sender.put("name", fromName);
+            sender.put("email", fromAddress);
+
+            ObjectNode recipient = objectMapper.createObjectNode();
+            recipient.put("email", to);
+            root.putArray("to").add(recipient);
+
+            root.put("subject", subject);
+            root.put("htmlContent", buildSimpleHtml(heading, bodyHtml));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("api-key", brevoApiKey);
+            headers.set("accept", "application/json");
+
+            HttpEntity<String> request = new HttpEntity<>(objectMapper.writeValueAsString(root), headers);
+
+            restTemplate.postForEntity(BREVO_API_URL, request, String.class);
+            log.info("Notification email sent via Brevo API: subject={} to={}", subject, maskEmail(to));
+        } catch (Exception ex) {
+            log.error("Failed to send notification email to {}: {}", maskEmail(to), ex.getMessage());
+            throw new EmailDeliveryException("Couldn't send the notification email right now.", ex);
+        }
+    }
+
+    private String buildSimpleHtml(String heading, String bodyHtml) {
+        return """
+                <!DOCTYPE html>
+                <html>
+                <body style="margin:0;padding:24px;background:#f1f5f9;font-family:Segoe UI,Arial,sans-serif;">
+                  <table role="presentation" width="100%%" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;">
+                    <tr><td style="padding:24px 28px;background:#0f172a;">
+                      <span style="color:#ffffff;font-size:17px;font-weight:600;">AssetTower</span>
+                    </td></tr>
+                    <tr><td style="padding:24px 28px;">
+                      <h2 style="margin:0 0 12px;font-size:18px;color:#0f172a;">%s</h2>
+                      <div style="font-size:14px;color:#334155;line-height:1.7;">%s</div>
+                    </td></tr>
+                    <tr><td style="padding:16px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;">
+                      <span style="font-size:11px;color:#94a3b8;">Automated message from AssetTower — please do not reply.</span>
+                    </td></tr>
+                  </table>
+                </body>
+                </html>
+                """.formatted(heading, bodyHtml);
+    }
 }

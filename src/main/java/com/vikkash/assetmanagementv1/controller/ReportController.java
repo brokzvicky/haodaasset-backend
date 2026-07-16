@@ -1,5 +1,6 @@
 package com.vikkash.assetmanagementv1.controller;
 
+import com.vikkash.assetmanagementv1.service.AnalyticsService;
 import com.vikkash.assetmanagementv1.service.ReportService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.io.IOException;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.Map;
 
 /**
  * Mapped under /api/admin/** so Spring Security's ADMIN role guard
@@ -21,9 +23,22 @@ import java.time.format.DateTimeFormatter;
 public class ReportController {
 
     private final ReportService reportService;
+    private final AnalyticsService analyticsService;
 
-    public ReportController(ReportService reportService) {
+    public ReportController(ReportService reportService, AnalyticsService analyticsService) {
         this.reportService = reportService;
+        this.analyticsService = analyticsService;
+    }
+
+    /**
+     * GET /api/admin/reports/analytics
+     * Chart-ready aggregate statistics (counts by status/type/location/brand,
+     * warranty expiry watchlist, maintenance stats, asset value totals, age
+     * brackets) — powers the Reports & Analytics page and Dashboard widgets.
+     */
+    @GetMapping("/analytics")
+    public Map<String, Object> analytics() {
+        return analyticsService.getAnalytics();
     }
 
     /**

@@ -11,4 +11,7 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
     List<AuditLog> findTop300ByOrderByTimestampDesc();
 
     List<AuditLog> findTop300ByEntityTypeOrderByTimestampDesc(String entityType);
+
+    /** Powers the per-asset Timeline view — full history for one asset, oldest first. */
+    List<AuditLog> findByEntityTypeAndEntityIdOrderByTimestampAsc(String entityType, String entityId);
 }

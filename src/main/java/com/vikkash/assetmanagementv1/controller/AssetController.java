@@ -2,14 +2,19 @@ package com.vikkash.assetmanagementv1.controller;
 
 import com.vikkash.assetmanagementv1.dto.AssetEmailLogResponse;
 import com.vikkash.assetmanagementv1.dto.AssignAssetRequest;
+import com.vikkash.assetmanagementv1.dto.BulkAssetUpdateRequest;
 import com.vikkash.assetmanagementv1.dto.OrphanedAssetDTO;
 import com.vikkash.assetmanagementv1.dto.RepairResultDTO;
 import com.vikkash.assetmanagementv1.dto.SendAssetEmailResponse;
+import com.vikkash.assetmanagementv1.dto.TimelineEventDTO;
 import com.vikkash.assetmanagementv1.entity.Asset;
 import com.vikkash.assetmanagementv1.service.AssetEmailService;
 import com.vikkash.assetmanagementv1.service.AssetService;
+import com.vikkash.assetmanagementv1.service.AssetTimelineService;
+import com.vikkash.assetmanagementv1.service.QrCodeService;
 import com.vikkash.assetmanagementv1.service.TemporaryAssignmentReminderService;
 import jakarta.validation.Valid;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -34,12 +39,18 @@ public class AssetController {
     private final AssetService assetService;
     private final AssetEmailService assetEmailService;
     private final TemporaryAssignmentReminderService temporaryAssignmentReminderService;
+    private final AssetTimelineService assetTimelineService;
+    private final QrCodeService qrCodeService;
 
     public AssetController(AssetService assetService, AssetEmailService assetEmailService,
-                            TemporaryAssignmentReminderService temporaryAssignmentReminderService) {
+                            TemporaryAssignmentReminderService temporaryAssignmentReminderService,
+                            AssetTimelineService assetTimelineService,
+                            QrCodeService qrCodeService) {
         this.assetService = assetService;
         this.assetEmailService = assetEmailService;
         this.temporaryAssignmentReminderService = temporaryAssignmentReminderService;
+        this.assetTimelineService = assetTimelineService;
+        this.qrCodeService = qrCodeService;
     }
 
     @GetMapping
@@ -166,5 +177,56 @@ public class AssetController {
     @GetMapping("/email-logs")
     public List<AssetEmailLogResponse> getEmailLogs() {
         return assetEmailService.getEmailLogs();
+    }
+
+    // ── QR Code Generation ──────────────────────────────────────────────────
+
+    /** Streams a scannable PNG QR code that deep-links into this asset's record. */
+    @GetMapping(value = "/{id}/qrcode", produces = MediaType.IMAGE_PNG_VALUE)
+    public ResponseEntity<byte[]> getQrCode(@PathVariable Long id) throws Exception {
+        Asset asset = assetService.getById(id);
+        byte[] png = qrCodeService.generateAssetQrCode(id, asset.getSerialNumber());
+        return ResponseEntity.ok().contentType(MediaType.IMAGE_PNG).body(png);
+    }
+
+    // ── Asset Timeline (Audit + Email + Maintenance + Documents merged) ────
+
+    @GetMapping("/{id}/timeline")
+    public List<TimelineEventDTO> getTimeline(@PathVariable Long id) {
+        return assetTimelineService.getTimeline(id);
+    }
+
+    // ── Advanced Search & Filters ────────────────────────────────────────────
+
+    @GetMapping("/search")
+    public List<Asset> search(@RequestParam(required = false) String keyword,
+                               @RequestParam(required = false) String assetType,
+                               @RequestParam(required = false) String assetStatus,
+                               @RequestParam(required = false) String assetCondition,
+                               @RequestParam(required = false) String location,
+                               @RequestParam(required = false) String brand,
+                               @RequestParam(required = false) String employeeId,
+                               @RequestParam(required = false) String purchaseDateFrom,
+                               @RequestParam(required = false) String purchaseDateTo,
+                               @RequestParam(required = false) String warrantyExpiryFrom,
+                               @RequestParam(required = false) String warrantyExpiryTo) {
+        return assetService.search(keyword, assetType, assetStatus, assetCondition, location, brand, employeeId,
+                purchaseDateFrom, purchaseDateTo, warrantyExpiryFrom, warrantyExpiryTo);
+    }
+
+    // ── Bulk Operations ───────────────────────────────────────────────────────
+
+    @PutMapping("/bulk-update")
+    public ResponseEntity<Map<String, Object>> bulkUpdate(@RequestBody BulkAssetUpdateRequest request,
+                                                            Authentication authentication) {
+        String performedBy = authentication != null ? authentication.getName() : "unknown";
+        return ResponseEntity.ok(assetService.bulkUpdate(request, performedBy));
+    }
+
+    @PostMapping("/bulk-delete")
+    public ResponseEntity<Map<String, Object>> bulkDelete(@RequestBody Map<String, List<Long>> body,
+                                                            Authentication authentication) {
+        String performedBy = authentication != null ? authentication.getName() : "unknown";
+        return ResponseEntity.ok(assetService.bulkDelete(body.get("assetIds"), performedBy));
     }
 }

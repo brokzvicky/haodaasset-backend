@@ -1,6 +1,7 @@
 package com.vikkash.assetmanagementv1.service;
 
 import com.vikkash.assetmanagementv1.dto.AssignAssetRequest;
+import com.vikkash.assetmanagementv1.dto.BulkAssetUpdateRequest;
 import com.vikkash.assetmanagementv1.dto.OrphanedAssetDTO;
 import com.vikkash.assetmanagementv1.dto.RepairResultDTO;
 import com.vikkash.assetmanagementv1.entity.Asset;
@@ -10,9 +11,11 @@ import com.vikkash.assetmanagementv1.exception.ResourceNotFoundException;
 import com.vikkash.assetmanagementv1.repository.AssetRepository;
 import com.vikkash.assetmanagementv1.repository.AssetRequestRepository;
 import com.vikkash.assetmanagementv1.repository.EmployeeRepository;
+import jakarta.persistence.criteria.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -469,42 +472,15 @@ public class AssetService {
             asset.setRemarks(updatedAsset.getRemarks());
         }
 
-        // Update condition and possibly status based on it.
-        //
-        // BUG FIX: the Faulty/Damaged branches used to unconditionally overwrite
-        // assetStatus, even when the asset was currently "Assigned" to an
-        // employee. Since this endpoint (PUT /assets/{id}) is also what the
-        // Asset Inventory page's inline "change condition" control calls,
-        // simply flagging an assigned asset's condition as Faulty/Damaged would
-        // silently strip its "Assigned" status — while employeeId/employeeName/
-        // assignedDate were left untouched. The result: the Employee page
-        // (which matches purely on employeeId) still correctly listed the
-        // asset as assigned to that employee, but the Assets Inventory page's
-        // Status column showed "Faulty"/"Under Repair" instead of "Assigned"
-        // for that same asset — an inconsistent, incorrect display for exactly
-        // those employees whose assigned asset had its condition edited this way.
-        // The New/Excellent/Good/Fair branches already guarded against this
-        // (see "Only make Available if not currently assigned" below); Faulty
-        // and Damaged now use the identical guard for consistency.
+        // Update condition and possibly status based on it
         if (updatedAsset.getAssetCondition() != null) {
             asset.setAssetCondition(updatedAsset.getAssetCondition());
-            boolean conditionImpliesOutOfService =
-                    "Faulty".equals(updatedAsset.getAssetCondition()) || "Damaged".equals(updatedAsset.getAssetCondition());
-            if (conditionImpliesOutOfService && "Assigned".equals(asset.getAssetStatus())) {
-                log.info("Asset {} condition set to '{}' while still Assigned to employeeId={} — "
-                                + "status kept as 'Assigned' (not auto-changed); return the asset first if it needs to leave service.",
-                        id, updatedAsset.getAssetCondition(), asset.getEmployeeId());
-            }
             switch (updatedAsset.getAssetCondition()) {
                 case "Faulty":
-                    if (!"Assigned".equals(asset.getAssetStatus())) {
-                        asset.setAssetStatus("Faulty");
-                    }
+                    asset.setAssetStatus("Faulty");
                     break;
                 case "Damaged":
-                    if (!"Assigned".equals(asset.getAssetStatus())) {
-                        asset.setAssetStatus("Under Repair");
-                    }
+                    asset.setAssetStatus("Under Repair");
                     break;
                 case "New":
                 case "Excellent":
@@ -628,5 +604,103 @@ public class AssetService {
         assetRepository.deleteById(id);
         auditLogService.record("ASSET", String.valueOf(id), "DELETED",
                 "Deleted asset '" + asset.getLaptopName() + "' (SN: " + asset.getSerialNumber() + ")");
+    }
+
+    // ── Advanced Search & Filters ────────────────────────────────────────────
+
+    /**
+     * Builds a dynamic query across any combination of provided filters.
+     * Any parameter left null/blank is simply not applied. `keyword` does a
+     * loose match across name, brand, model, serial number, and employee name.
+     */
+    @Transactional(readOnly = true)
+    public List<Asset> search(String keyword, String assetType, String assetStatus, String assetCondition,
+                               String location, String brand, String employeeId,
+                               String purchaseDateFrom, String purchaseDateTo,
+                               String warrantyExpiryFrom, String warrantyExpiryTo) {
+
+        Specification<Asset> spec = (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+
+            if (keyword != null && !keyword.isBlank()) {
+                String like = "%" + keyword.trim().toLowerCase() + "%";
+                predicates.add(cb.or(
+                        cb.like(cb.lower(root.get("laptopName")), like),
+                        cb.like(cb.lower(root.get("brand")), like),
+                        cb.like(cb.lower(root.get("model")), like),
+                        cb.like(cb.lower(root.get("serialNumber")), like),
+                        cb.like(cb.lower(root.get("employeeName")), like),
+                        cb.like(cb.lower(root.get("employeeId")), like)
+                ));
+            }
+            if (assetType != null && !assetType.isBlank()) predicates.add(cb.equal(root.get("assetType"), assetType));
+            if (assetStatus != null && !assetStatus.isBlank()) predicates.add(cb.equal(root.get("assetStatus"), assetStatus));
+            if (assetCondition != null && !assetCondition.isBlank()) predicates.add(cb.equal(root.get("assetCondition"), assetCondition));
+            if (location != null && !location.isBlank()) predicates.add(cb.equal(cb.lower(root.get("location")), location.toLowerCase()));
+            if (brand != null && !brand.isBlank()) predicates.add(cb.equal(cb.lower(root.get("brand")), brand.toLowerCase()));
+            if (employeeId != null && !employeeId.isBlank()) predicates.add(cb.equal(root.get("employeeId"), employeeId));
+            if (purchaseDateFrom != null && !purchaseDateFrom.isBlank()) predicates.add(cb.greaterThanOrEqualTo(root.get("purchaseDate"), purchaseDateFrom));
+            if (purchaseDateTo != null && !purchaseDateTo.isBlank()) predicates.add(cb.lessThanOrEqualTo(root.get("purchaseDate"), purchaseDateTo));
+            if (warrantyExpiryFrom != null && !warrantyExpiryFrom.isBlank()) predicates.add(cb.greaterThanOrEqualTo(root.get("warrantyExpiry"), warrantyExpiryFrom));
+            if (warrantyExpiryTo != null && !warrantyExpiryTo.isBlank()) predicates.add(cb.lessThanOrEqualTo(root.get("warrantyExpiry"), warrantyExpiryTo));
+
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
+
+        return assetRepository.findAll(spec);
+    }
+
+    // ── Bulk Operations ───────────────────────────────────────────────────────
+
+    @Transactional
+    public Map<String, Object> bulkUpdate(BulkAssetUpdateRequest request, String performedBy) {
+        if (request.getAssetIds() == null || request.getAssetIds().isEmpty()) {
+            throw new IllegalArgumentException("No assets selected for bulk update.");
+        }
+        int updated = 0;
+        for (Long id : request.getAssetIds()) {
+            Asset asset = assetRepository.findById(id).orElse(null);
+            if (asset == null) continue;
+
+            if (request.getAssetStatus() != null && !request.getAssetStatus().isBlank()) {
+                asset.setAssetStatus(request.getAssetStatus());
+            }
+            if (request.getLocation() != null && !request.getLocation().isBlank()) {
+                asset.setLocation(request.getLocation());
+            }
+            if (request.getAssetCondition() != null && !request.getAssetCondition().isBlank()) {
+                asset.setAssetCondition(request.getAssetCondition());
+            }
+            if (request.getRemarks() != null && !request.getRemarks().isBlank()) {
+                asset.setRemarks(request.getRemarks());
+            }
+            assetRepository.save(asset);
+            updated++;
+        }
+
+        auditLogService.record("ASSET", "BULK", "BULK_UPDATED",
+                "Bulk-updated " + updated + " asset(s)"
+                        + (request.getAssetStatus() != null ? " -> status=" + request.getAssetStatus() : "")
+                        + (request.getLocation() != null ? " -> location=" + request.getLocation() : ""),
+                performedBy);
+
+        return Map.of("updatedCount", updated);
+    }
+
+    @Transactional
+    public Map<String, Object> bulkDelete(List<Long> assetIds, String performedBy) {
+        if (assetIds == null || assetIds.isEmpty()) {
+            throw new IllegalArgumentException("No assets selected for bulk delete.");
+        }
+        int deleted = 0;
+        for (Long id : assetIds) {
+            if (assetRepository.existsById(id)) {
+                assetRepository.deleteById(id);
+                deleted++;
+            }
+        }
+        auditLogService.record("ASSET", "BULK", "BULK_DELETED",
+                "Bulk-deleted " + deleted + " asset(s)", performedBy);
+        return Map.of("deletedCount", deleted);
     }
 }
