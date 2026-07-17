@@ -1,10 +1,12 @@
 package com.vikkash.assetmanagementv1.service;
 
+import com.vikkash.assetmanagementv1.config.StorageProperties;
 import com.vikkash.assetmanagementv1.entity.Asset;
 import com.vikkash.assetmanagementv1.entity.AssetDocument;
 import com.vikkash.assetmanagementv1.exception.ResourceNotFoundException;
 import com.vikkash.assetmanagementv1.repository.AssetDocumentRepository;
 import com.vikkash.assetmanagementv1.repository.AssetRepository;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,7 +17,6 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.UUID;
@@ -23,9 +24,10 @@ import java.util.UUID;
 /**
  * Document Management: lets admins attach supporting files (invoices,
  * warranty cards, manuals, insurance papers) to any asset. Files are stored
- * on disk under {@link #uploadDir}, named with a random UUID; only metadata
- * + the stored (safe) file name is persisted in the database — same pattern
- * used for Service Billing invoices.
+ * on disk under the resolved {@link StorageProperties} root, named with a
+ * random UUID; only metadata + the stored (safe) file name is persisted in
+ * the database — same pattern used for Service Billing invoices, and now
+ * sharing the same hardened storage-resolution logic.
  */
 @Service
 public class AssetDocumentService {
@@ -41,12 +43,19 @@ public class AssetDocumentService {
     @Value("${app.storage.document-upload-dir:uploads/asset-documents}")
     private String uploadDir;
 
+    private StorageProperties storage;
+
     public AssetDocumentService(AssetDocumentRepository documentRepository,
                                  AssetRepository assetRepository,
                                  AuditLogService auditLogService) {
         this.documentRepository = documentRepository;
         this.assetRepository = assetRepository;
         this.auditLogService = auditLogService;
+    }
+
+    @PostConstruct
+    void init() {
+        this.storage = new StorageProperties(uploadDir, "DOCUMENT");
     }
 
     @Transactional(readOnly = true)
@@ -72,14 +81,8 @@ public class AssetDocumentService {
         if (dot >= 0) extension = originalName.substring(dot);
 
         try {
-            Path root = uploadRoot();
-            Files.createDirectories(root);
-
             String storedName = UUID.randomUUID() + extension;
-            Path destination = root.resolve(storedName).normalize();
-            if (!destination.startsWith(root)) {
-                throw new IllegalArgumentException("Invalid file name.");
-            }
+            Path destination = storage.resolve(storedName);
             Files.copy(file.getInputStream(), destination, StandardCopyOption.REPLACE_EXISTING);
 
             AssetDocument doc = new AssetDocument();
@@ -97,6 +100,7 @@ public class AssetDocumentService {
                     "Uploaded document '" + originalName + "' (" + doc.getDocumentType() + ") for asset '"
                             + asset.getLaptopName() + "'", uploadedBy);
 
+            log.info("Stored asset document id={} at {}", saved.getId(), destination);
             return saved;
         } catch (IOException e) {
             log.error("Failed to store asset document: {}", e.getMessage(), e);
@@ -113,9 +117,11 @@ public class AssetDocumentService {
     @Transactional(readOnly = true)
     public Path resolveFile(Long documentId) {
         AssetDocument doc = getMetadata(documentId);
-        Path root = uploadRoot();
-        Path path = root.resolve(doc.getStoredFileName()).normalize();
-        if (!path.startsWith(root) || !Files.exists(path)) {
+        Path path = storage.resolve(doc.getStoredFileName());
+        if (!Files.exists(path)) {
+            log.error("Document DB record exists (documentId={}, storedFileName={}) but file is missing at " +
+                            "resolved location {}. Storage root in use: {}. Check the storage volume/disk mount.",
+                    documentId, doc.getStoredFileName(), path, storage.root());
             throw new ResourceNotFoundException("Document file is missing on disk.");
         }
         return path;
@@ -125,19 +131,13 @@ public class AssetDocumentService {
     public void delete(Long documentId, String deletedBy) {
         AssetDocument doc = getMetadata(documentId);
         try {
-            Path path = uploadRoot().resolve(doc.getStoredFileName()).normalize();
-            if (path.startsWith(uploadRoot())) {
-                Files.deleteIfExists(path);
-            }
+            Path path = storage.resolve(doc.getStoredFileName());
+            Files.deleteIfExists(path);
         } catch (IOException e) {
             log.warn("Could not delete document file '{}': {}", doc.getStoredFileName(), e.getMessage());
         }
         documentRepository.delete(doc);
         auditLogService.record("ASSET", String.valueOf(doc.getAssetId()), "DOCUMENT_DELETED",
                 "Deleted document '" + doc.getOriginalFileName() + "'", deletedBy);
-    }
-
-    private Path uploadRoot() {
-        return Paths.get(uploadDir).toAbsolutePath().normalize();
     }
 }
