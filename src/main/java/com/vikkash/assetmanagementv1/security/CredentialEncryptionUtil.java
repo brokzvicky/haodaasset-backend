@@ -1,6 +1,9 @@
 package com.vikkash.assetmanagementv1.security;
 
 import jakarta.annotation.PostConstruct;
+import com.vikkash.assetmanagementv1.exception.CredentialDecryptionException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -20,6 +23,8 @@ import java.util.Base64;
  */
 @Component
 public class CredentialEncryptionUtil {
+
+    private static final Logger log = LoggerFactory.getLogger(CredentialEncryptionUtil.class);
 
     private static final String ALGORITHM = "AES/GCM/NoPadding";
     private static final int GCM_IV_LENGTH_BYTES = 12;
@@ -97,6 +102,15 @@ public class CredentialEncryptionUtil {
 
             byte[] combined = Base64.getDecoder().decode(encoded);
 
+            if (combined.length <= GCM_IV_LENGTH_BYTES) {
+                // Too short to even contain an IV + ciphertext/tag — definitely not
+                // something this class ever produced. Fail fast with a clear signal
+                // instead of letting ByteBuffer throw an opaque BufferUnderflowException.
+                throw new IllegalArgumentException(
+                        "Stored value (" + combined.length + " bytes decoded) is shorter than the "
+                                + GCM_IV_LENGTH_BYTES + "-byte IV — not valid AES-GCM ciphertext.");
+            }
+
             ByteBuffer buffer = ByteBuffer.wrap(combined);
 
             byte[] iv = new byte[GCM_IV_LENGTH_BYTES];
@@ -117,8 +131,23 @@ public class CredentialEncryptionUtil {
             return new String(plainText, StandardCharsets.UTF_8);
 
         } catch (Exception e) {
-            throw new IllegalStateException(
-                    "Failed to decrypt credential. The stored value may be corrupted or the encryption key has changed.",
+            // Log the root exception's CLASS (never the secret, never the plaintext/ciphertext)
+            // so an operator can immediately tell key-mismatch vs malformed/corrupted data apart
+            // from the server log alone, without needing to reproduce the request.
+            //  - AEADBadTagException      -> ciphertext doesn't match the CURRENT encryption key
+            //                                (secret was rotated, or this row came from a
+            //                                different environment/secret).
+            //  - IllegalArgumentException -> stored value isn't valid Base64 / valid GCM length
+            //                                (legacy-corrupted row, or manually-inserted test data
+            //                                that was never actually encrypted).
+            //  - BufferUnderflowException -> same as above, different code path.
+            log.error("Credential decryption failed — root cause: {}: {}",
+                    e.getClass().getName(), e.getMessage());
+            throw new CredentialDecryptionException(
+                    "Failed to decrypt credential. The stored value may be corrupted, or it was "
+                            + "encrypted with a different key than the one currently configured "
+                            + "(CREDENTIAL_ENCRYPTION_SECRET). Re-enter and save this credential's "
+                            + "password to fix it.",
                     e
             );
         }
