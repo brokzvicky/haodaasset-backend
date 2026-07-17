@@ -57,6 +57,15 @@ public class NetworkCredentialService {
         return NetworkCredentialResponse.from(getEntityById(id));
     }
 
+    /** Sets the optional reminder dates that power NETWORK_CREDENTIAL_ROTATION / FIRMWARE_UPDATE_REMINDER notifications. */
+    @Transactional
+    public NetworkCredentialResponse updateReminderDates(Long id, java.time.LocalDate rotationDueDate, java.time.LocalDate firmwareDueDate) {
+        NetworkCredential entity = getEntityById(id);
+        entity.setRotationDueDate(rotationDueDate);
+        entity.setFirmwareDueDate(firmwareDueDate);
+        return NetworkCredentialResponse.from(repository.save(entity));
+    }
+
     @Transactional(readOnly = true)
     public List<NetworkCredentialResponse> search(String query) {
         if (query == null || query.isBlank()) {

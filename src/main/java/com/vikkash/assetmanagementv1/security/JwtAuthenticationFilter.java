@@ -43,9 +43,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
 
         String header = request.getHeader("Authorization");
+        String token = null;
 
         if (header != null && header.startsWith("Bearer ")) {
-            String token = header.substring(7);
+            token = header.substring(7);
+        } else if (request.getRequestURI().endsWith("/pulse/notifications/stream")) {
+            // Browser EventSource can't set custom headers, so the SSE stream
+            // accepts the token as a query param instead: ?token=<jwt>
+            String qp = request.getParameter("token");
+            if (qp != null && !qp.isBlank()) token = qp;
+        }
+
+        if (token != null) {
 
             if (jwtUtil.isTokenValid(token)) {
                 String subject = jwtUtil.extractSubject(token);

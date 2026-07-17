@@ -142,6 +142,19 @@ public class NetworkCredential {
     public Integer getWebPort() { return webPort; }
     public void setWebPort(Integer webPort) { this.webPort = webPort; }
 
+    // ── Enterprise Notification Center reminder dates (optional) ───────────
+    @Column(name = "rotation_due_date")
+    private java.time.LocalDate rotationDueDate;
+
+    @Column(name = "firmware_due_date")
+    private java.time.LocalDate firmwareDueDate;
+
+    public java.time.LocalDate getRotationDueDate() { return rotationDueDate; }
+    public void setRotationDueDate(java.time.LocalDate rotationDueDate) { this.rotationDueDate = rotationDueDate; }
+
+    public java.time.LocalDate getFirmwareDueDate() { return firmwareDueDate; }
+    public void setFirmwareDueDate(java.time.LocalDate firmwareDueDate) { this.firmwareDueDate = firmwareDueDate; }
+
     public String getLocation() { return location; }
     public void setLocation(String location) { this.location = location; }
 

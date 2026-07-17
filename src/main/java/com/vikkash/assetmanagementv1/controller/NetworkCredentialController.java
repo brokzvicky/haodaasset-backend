@@ -76,6 +76,18 @@ public class NetworkCredentialController {
         return ResponseEntity.ok(Map.of("message", "Network credential deleted successfully"));
     }
 
+    /** Sets/clears the optional rotation & firmware reminder dates used by the Enterprise Notification Center. */
+    @PutMapping("/{id}/reminder-dates")
+    public ResponseEntity<NetworkCredentialResponse> updateReminderDates(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> body) {
+        java.time.LocalDate rotation = body.get("rotationDueDate") != null && !body.get("rotationDueDate").isBlank()
+                ? java.time.LocalDate.parse(body.get("rotationDueDate")) : null;
+        java.time.LocalDate firmware = body.get("firmwareDueDate") != null && !body.get("firmwareDueDate").isBlank()
+                ? java.time.LocalDate.parse(body.get("firmwareDueDate")) : null;
+        return ResponseEntity.ok(service.updateReminderDates(id, rotation, firmware));
+    }
+
     /**
      * Decrypts and returns the device login password. Requires an active
      * credential-unlock window (see /credential-access/*) — never callable

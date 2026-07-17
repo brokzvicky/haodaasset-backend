@@ -59,8 +59,19 @@ public class NetworkCredentialResponse {
         r.updatedBy = c.getUpdatedBy();
         r.createdAt = c.getCreatedAt();
         r.updatedAt = c.getUpdatedAt();
+        r.rotationDueDate = c.getRotationDueDate();
+        r.firmwareDueDate = c.getFirmwareDueDate();
         return r;
     }
+
+    private java.time.LocalDate rotationDueDate;
+    private java.time.LocalDate firmwareDueDate;
+
+    public java.time.LocalDate getRotationDueDate() { return rotationDueDate; }
+    public void setRotationDueDate(java.time.LocalDate rotationDueDate) { this.rotationDueDate = rotationDueDate; }
+
+    public java.time.LocalDate getFirmwareDueDate() { return firmwareDueDate; }
+    public void setFirmwareDueDate(java.time.LocalDate firmwareDueDate) { this.firmwareDueDate = firmwareDueDate; }
 
     // ── Getters & Setters ──────────────────────────────────────────────────
 

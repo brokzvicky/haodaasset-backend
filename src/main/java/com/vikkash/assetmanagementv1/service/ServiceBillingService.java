@@ -1,11 +1,9 @@
 package com.vikkash.assetmanagementv1.service;
 
-import com.vikkash.assetmanagementv1.config.StorageProperties;
 import com.vikkash.assetmanagementv1.entity.ServiceBilling;
 import com.vikkash.assetmanagementv1.exception.DuplicateResourceException;
 import com.vikkash.assetmanagementv1.exception.ResourceNotFoundException;
 import com.vikkash.assetmanagementv1.repository.ServiceBillingRepository;
-import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,6 +15,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
 import java.util.List;
@@ -27,16 +26,10 @@ import java.util.UUID;
  * All Service Billing business logic lives here: CRUD for payment records
  * plus secure storage/retrieval of the uploaded PDF invoices.
  *
- * Invoice files are stored on disk under the resolved {@link StorageProperties}
- * root, named with a random UUID (never the original filename) to avoid
- * path-traversal / collision issues. Only the resulting relative path is
- * persisted on the entity — the file bytes never touch the database.
- *
- * The storage root is resolved ONCE at startup via {@link StorageProperties}
- * (see {@link #init()}) and reused for every request, so upload and download
- * are guaranteed to agree on the same absolute location for the lifetime of
- * this process. In production, app.storage.invoice-upload-dir MUST be an
- * absolute path backed by a persistent volume/disk — see application.properties.
+ * Invoice files are stored on disk under {@link #uploadDir}, named with a
+ * random UUID (never the original filename) to avoid path-traversal /
+ * collision issues. Only the resulting relative path is persisted on the
+ * entity — the file bytes never touch the database.
  */
 @Service
 public class ServiceBillingService {
@@ -48,22 +41,14 @@ public class ServiceBillingService {
     private final ServiceBillingRepository repository;
     private final AuditLogService auditLogService;
 
+    // Root folder for invoice storage. Configurable so deployments can point
+    // this at a persistent disk/volume; defaults to a local folder for dev.
     @Value("${app.storage.invoice-upload-dir:uploads/invoices}")
     private String uploadDir;
-
-    // Resolved exactly once at startup — see init(). Never recompute this
-    // per-request; that's what caused upload and download to silently
-    // disagree on the storage location.
-    private StorageProperties storage;
 
     public ServiceBillingService(ServiceBillingRepository repository, AuditLogService auditLogService) {
         this.repository = repository;
         this.auditLogService = auditLogService;
-    }
-
-    @PostConstruct
-    void init() {
-        this.storage = new StorageProperties(uploadDir, "INVOICE");
     }
 
     // ── Read ───────────────────────────────────────────────────────────────
@@ -79,12 +64,19 @@ public class ServiceBillingService {
                 .orElseThrow(() -> new ResourceNotFoundException("Service payment not found with id: " + id));
     }
 
+    /** Billing History for a service+vendor: every past billing period, latest first (Requirement 6). */
     @Transactional(readOnly = true)
     public List<ServiceBilling> getHistory(String service, String vendor) {
         return repository.findByServiceIgnoreCaseAndVendorIgnoreCaseOrderByBillingFromDateDesc(
                 requireText(service, "Service"), requireText(vendor, "Vendor"));
     }
 
+    /**
+     * Search/filter used by the list view and by PDF/Excel export
+     * (Requirement 9): by service, vendor, billing period (overlap with the
+     * given range), status, and payment date. Any parameter left null/blank
+     * is ignored.
+     */
     @Transactional(readOnly = true)
     public List<ServiceBilling> search(String service, String vendor, LocalDate periodFrom, LocalDate periodTo,
                                         String status, LocalDate paymentDate) {
@@ -117,6 +109,13 @@ public class ServiceBillingService {
 
     // ── Create ─────────────────────────────────────────────────────────────
 
+    /**
+     * Creates a brand-new billing record. Every call — including a "Re-Add
+     * Billing" for a service that already has payment history — always
+     * inserts a fresh row (Requirement 1); existing records are never
+     * touched. Rejects a period that's already been billed for this exact
+     * service+vendor (Requirement 7).
+     */
     @Transactional
     public ServiceBilling create(String service, String vendor, LocalDate billingFromDate, LocalDate billingToDate,
                                   BigDecimal amount, LocalDate paymentDate, LocalDate dueDate,
@@ -249,25 +248,15 @@ public class ServiceBillingService {
 
     // ── Invoice file access (view / download) ───────────────────────────────
 
-    /**
-     * Resolves the absolute path of a stored invoice, verifying it exists on
-     * disk. Logs an operator-facing error (distinct from the user-facing
-     * message) when the DB says an invoice exists but the file is missing —
-     * that combination means the storage volume/mount needs attention, not
-     * that the user did anything wrong.
-     */
+    /** Resolves the absolute path of a stored invoice, verifying it exists on disk. */
     @Transactional(readOnly = true)
     public Path resolveInvoiceFile(Long id) {
         ServiceBilling billing = getById(id);
         if (billing.getInvoicePath() == null || billing.getInvoicePath().isBlank()) {
             throw new ResourceNotFoundException("No invoice has been uploaded for this payment.");
         }
-        Path path = storage.resolve(billing.getInvoicePath());
-        if (!Files.exists(path)) {
-            log.error("Invoice DB record exists (billingId={}, invoicePath={}) but file is missing at resolved " +
-                            "location {}. Storage root in use: {}. Check that the storage volume/disk is mounted " +
-                            "correctly and was not reset by a redeploy/restart.",
-                    id, billing.getInvoicePath(), path, storage.root());
+        Path path = uploadRoot().resolve(billing.getInvoicePath()).normalize();
+        if (!path.startsWith(uploadRoot()) || !Files.exists(path)) {
             throw new ResourceNotFoundException("The invoice file could not be found on the server.");
         }
         return path;
@@ -283,6 +272,10 @@ public class ServiceBillingService {
 
     // ── Internal helpers ─────────────────────────────────────────────────────
 
+    private Path uploadRoot() {
+        return Paths.get(uploadDir).toAbsolutePath().normalize();
+    }
+
     private void storeInvoice(ServiceBilling billing, MultipartFile file) {
         String contentType = file.getContentType();
         String originalName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "invoice.pdf";
@@ -294,14 +287,19 @@ public class ServiceBillingService {
         }
 
         try {
+            Path root = uploadRoot();
+            Files.createDirectories(root);
+
             String storedName = UUID.randomUUID() + ".pdf";
-            Path destination = storage.resolve(storedName);
+            Path destination = root.resolve(storedName).normalize();
+            if (!destination.startsWith(root)) {
+                throw new IllegalArgumentException("Invalid invoice file name.");
+            }
 
             Files.copy(file.getInputStream(), destination, StandardCopyOption.REPLACE_EXISTING);
 
             billing.setInvoicePath(storedName);
             billing.setInvoiceOriginalName(originalName);
-            log.info("Stored invoice for billingId={} at {}", billing.getId(), destination);
         } catch (IOException e) {
             log.error("Failed to store invoice file: {}", e.getMessage(), e);
             throw new IllegalStateException("Failed to store the uploaded invoice. Please try again.");
@@ -311,8 +309,10 @@ public class ServiceBillingService {
     private void deleteInvoiceFileQuietly(String storedName) {
         if (storedName == null || storedName.isBlank()) return;
         try {
-            Path path = storage.resolve(storedName);
-            Files.deleteIfExists(path);
+            Path path = uploadRoot().resolve(storedName).normalize();
+            if (path.startsWith(uploadRoot())) {
+                Files.deleteIfExists(path);
+            }
         } catch (IOException e) {
             log.warn("Could not delete old invoice file '{}': {}", storedName, e.getMessage());
         }
@@ -357,6 +357,7 @@ public class ServiceBillingService {
         if (!valid) {
             throw new IllegalArgumentException("Status must be one of: Paid, Pending, Overdue.");
         }
+        // Normalize to canonical casing
         return VALID_STATUSES.stream().filter(s -> s.equalsIgnoreCase(trimmed)).findFirst().orElse("Pending");
     }
 }
