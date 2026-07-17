@@ -77,10 +77,25 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Covers encryption/decryption failures (CredentialEncryptionUtil), and any
-     * other "this object is in an invalid state to complete this operation"
-     * failure. Logged at ERROR with the full stack trace so the real cause
-     * (e.g. AEADBadTagException from a corrupted/mismatched ciphertext) is
+     * Credential decrypt failures (CredentialEncryptionUtil.decrypt). This is a
+     * data-state problem, not a transient server fault — the ciphertext either no
+     * longer matches the configured encryption key, or is corrupted/invalid. A
+     * retry will never succeed on its own; the admin must re-enter the password
+     * (PUT /api/network/{id}) to re-encrypt it under the current key. Returned as
+     * 422 (not 500) so the client can distinguish "this row needs fixing" from an
+     * actual server error, and the full stack trace (with the real JCE exception,
+     * e.g. AEADBadTagException) is logged server-side for triage.
+     */
+    @ExceptionHandler(CredentialDecryptionException.class)
+    public ResponseEntity<ApiError> handleCredentialDecryption(CredentialDecryptionException ex,
+                                                                 HttpServletRequest req) {
+        log.error("Credential decryption failed at {}: {}", req.getRequestURI(), ex.getMessage(), ex);
+        return build(HttpStatus.UNPROCESSABLE_ENTITY, "Unprocessable Entity", ex.getMessage(), req);
+    }
+
+    /**
+     * Any other "this object is in an invalid state to complete this operation"
+     * failure. Logged at ERROR with the full stack trace so the real cause is
      * visible server-side, while the client only sees a safe generic message.
      */
     @ExceptionHandler(IllegalStateException.class)
