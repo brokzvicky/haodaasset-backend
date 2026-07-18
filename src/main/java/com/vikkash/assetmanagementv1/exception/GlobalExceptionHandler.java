@@ -3,6 +3,7 @@ package com.vikkash.assetmanagementv1.exception;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -23,6 +24,12 @@ import java.util.Map;
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    // Bug fix: this used to be a hardcoded "Maximum size is 10MB" string, which
+    // went stale the moment spring.servlet.multipart.max-file-size was raised
+    // to 200MB — it now always reflects whatever is actually configured.
+    @Value("${spring.servlet.multipart.max-file-size:200MB}")
+    private String configuredMaxFileSize;
 
     @ExceptionHandler(InvalidCredentialsException.class)
     public ResponseEntity<ApiError> handleInvalidCredentials(InvalidCredentialsException ex,
@@ -67,7 +74,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleMaxUploadSize(MaxUploadSizeExceededException ex, HttpServletRequest req) {
         log.debug("Upload too large at {}: {}", req.getRequestURI(), ex.getMessage());
         return build(HttpStatus.BAD_REQUEST, "Bad Request",
-                "The uploaded file is too large. Maximum size is 10MB.", req);
+                "The uploaded file is too large. Maximum size is " + configuredMaxFileSize + ".", req);
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

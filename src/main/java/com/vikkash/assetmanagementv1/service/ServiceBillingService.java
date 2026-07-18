@@ -6,30 +6,27 @@ import com.vikkash.assetmanagementv1.exception.ResourceNotFoundException;
 import com.vikkash.assetmanagementv1.repository.ServiceBillingRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
 import java.math.BigDecimal;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * All Service Billing business logic lives here: CRUD for payment records
  * plus secure storage/retrieval of the uploaded PDF invoices.
  *
- * Invoice files are stored on disk under {@link #uploadDir}, named with a
- * random UUID (never the original filename) to avoid path-traversal /
- * collision issues. Only the resulting relative path is persisted on the
- * entity — the file bytes never touch the database.
+ * Physical file storage is delegated to {@link FileStorageService}, which
+ * writes to a fixed, absolute, configurable location on local disk
+ * ({@code app.upload.dir}) — never to a relative path, and never to the
+ * application's temporary directory. Only the resulting stored FILENAME
+ * (a random UUID, never the original filename) is persisted on the
+ * entity — the file bytes never touch the database, and the database never
+ * stores a machine-specific absolute path either.
  */
 @Service
 public class ServiceBillingService {
@@ -40,15 +37,13 @@ public class ServiceBillingService {
 
     private final ServiceBillingRepository repository;
     private final AuditLogService auditLogService;
+    private final FileStorageService fileStorageService;
 
-    // Root folder for invoice storage. Configurable so deployments can point
-    // this at a persistent disk/volume; defaults to a local folder for dev.
-    @Value("${app.storage.invoice-upload-dir:uploads/invoices}")
-    private String uploadDir;
-
-    public ServiceBillingService(ServiceBillingRepository repository, AuditLogService auditLogService) {
+    public ServiceBillingService(ServiceBillingRepository repository, AuditLogService auditLogService,
+                                  FileStorageService fileStorageService) {
         this.repository = repository;
         this.auditLogService = auditLogService;
+        this.fileStorageService = fileStorageService;
     }
 
     // ── Read ───────────────────────────────────────────────────────────────
@@ -248,18 +243,29 @@ public class ServiceBillingService {
 
     // ── Invoice file access (view / download) ───────────────────────────────
 
-    /** Resolves the absolute path of a stored invoice, verifying it exists on disk. */
+    /**
+     * Resolves the absolute path of a stored invoice on local disk, verifying
+     * it exists before returning it. Reads exclusively from the configured
+     * {@code app.upload.dir} location — never from a temp directory — so the
+     * behavior is identical whether the app was just started, restarted, or
+     * the machine itself was rebooted, as long as the configured folder and
+     * the files inside it are still there.
+     */
     @Transactional(readOnly = true)
     public Path resolveInvoiceFile(Long id) {
         ServiceBilling billing = getById(id);
-        if (billing.getInvoicePath() == null || billing.getInvoicePath().isBlank()) {
+        String storedName = billing.getInvoicePath();
+        if (storedName == null || storedName.isBlank()) {
             throw new ResourceNotFoundException("No invoice has been uploaded for this payment.");
         }
-        Path path = uploadRoot().resolve(billing.getInvoicePath()).normalize();
-        if (!path.startsWith(uploadRoot()) || !Files.exists(path)) {
-            throw new ResourceNotFoundException("The invoice file could not be found on the server.");
+        if (!fileStorageService.exists(storedName)) {
+            throw new ResourceNotFoundException(
+                    "The invoice file for this payment is missing from local disk at '"
+                            + fileStorageService.getRootLocation() + "'. It may have been deleted, moved, "
+                            + "or the app.upload.dir configuration changed since it was uploaded. "
+                            + "Please re-upload the invoice.");
         }
-        return path;
+        return fileStorageService.resolve(storedName);
     }
 
     @Transactional(readOnly = true)
@@ -272,50 +278,21 @@ public class ServiceBillingService {
 
     // ── Internal helpers ─────────────────────────────────────────────────────
 
-    private Path uploadRoot() {
-        return Paths.get(uploadDir).toAbsolutePath().normalize();
-    }
-
+    /**
+     * Validates and writes the file to local disk via {@link FileStorageService},
+     * then records only the returned stored filename (a random UUID) and the
+     * original filename (for download/display purposes only — never used to
+     * locate the file on disk) on the entity.
+     */
     private void storeInvoice(ServiceBilling billing, MultipartFile file) {
-        String contentType = file.getContentType();
         String originalName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "invoice.pdf";
-
-        boolean isPdf = "application/pdf".equalsIgnoreCase(contentType)
-                || originalName.toLowerCase().endsWith(".pdf");
-        if (!isPdf) {
-            throw new IllegalArgumentException("Only PDF files are allowed for invoices.");
-        }
-
-        try {
-            Path root = uploadRoot();
-            Files.createDirectories(root);
-
-            String storedName = UUID.randomUUID() + ".pdf";
-            Path destination = root.resolve(storedName).normalize();
-            if (!destination.startsWith(root)) {
-                throw new IllegalArgumentException("Invalid invoice file name.");
-            }
-
-            Files.copy(file.getInputStream(), destination, StandardCopyOption.REPLACE_EXISTING);
-
-            billing.setInvoicePath(storedName);
-            billing.setInvoiceOriginalName(originalName);
-        } catch (IOException e) {
-            log.error("Failed to store invoice file: {}", e.getMessage(), e);
-            throw new IllegalStateException("Failed to store the uploaded invoice. Please try again.");
-        }
+        String storedName = fileStorageService.store(file); // throws IllegalArgumentException for bad type/size
+        billing.setInvoicePath(storedName);
+        billing.setInvoiceOriginalName(originalName);
     }
 
     private void deleteInvoiceFileQuietly(String storedName) {
-        if (storedName == null || storedName.isBlank()) return;
-        try {
-            Path path = uploadRoot().resolve(storedName).normalize();
-            if (path.startsWith(uploadRoot())) {
-                Files.deleteIfExists(path);
-            }
-        } catch (IOException e) {
-            log.warn("Could not delete old invoice file '{}': {}", storedName, e.getMessage());
-        }
+        fileStorageService.delete(storedName);
     }
 
     private String blankToNull(String value) {
