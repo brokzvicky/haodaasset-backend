@@ -916,6 +916,149 @@ public class EmailService {
                 );
     }
 
+    /** Immutable bag of fields needed to render the File Center "file shared" email. */
+    public record FileSharedEmailDetails(
+            String fileTitle,
+            String category,
+            String priority,
+            String uploadedBy,
+            String version,
+            String viewUrl
+    ) {}
+
+    /**
+     * Sends the Haoda File Center "a new file has been shared with you"
+     * notification. Deliberately does NOT attach the file — the button
+     * links back into File Center so the employee authenticates first and
+     * the download goes through the normal, logged access path.
+     *
+     * @param to             employee's email address
+     * @param employeeName   employee's display name
+     * @param subject        email subject line (admin can customize this in the Share File confirmation modal)
+     * @param introMessage   the intro paragraph text (admin can customize this too; rendered as plain text, not HTML)
+     * @param details        file fields + the secure View File link to render into the email body
+     */
+    public void sendFileSharedEmail(String to, String employeeName, String subject, String introMessage,
+                                     FileSharedEmailDetails details) {
+        try {
+            ObjectNode root = objectMapper.createObjectNode();
+
+            ObjectNode sender = root.putObject("sender");
+            sender.put("name", fromName);
+            sender.put("email", fromAddress);
+
+            ObjectNode recipient = objectMapper.createObjectNode();
+            recipient.put("email", to);
+            recipient.put("name", employeeName);
+            root.putArray("to").add(recipient);
+
+            root.put("subject", subject);
+            root.put("htmlContent", buildFileSharedHtml(employeeName, introMessage, details));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("api-key", brevoApiKey);
+            headers.set("accept", "application/json");
+
+            HttpEntity<String> request = new HttpEntity<>(objectMapper.writeValueAsString(root), headers);
+
+            restTemplate.postForEntity(BREVO_API_URL, request, String.class);
+            log.info("File Center share email sent via Brevo API: file={} to={}", details.fileTitle(), maskEmail(to));
+        } catch (ResourceAccessException ex) {
+            log.error("Network error calling Brevo API for File Center email to {}: {}", maskEmail(to), ex.getMessage());
+            throw new EmailDeliveryException(
+                    "Couldn't send the file-shared email right now. Please try again in a moment.", ex);
+        } catch (RestClientException ex) {
+            HttpStatusCode status = extractStatus(ex);
+            log.error("Brevo API rejected File Center email to {} (status={}): {}", maskEmail(to), status, ex.getMessage());
+            throw new EmailDeliveryException(
+                    "Couldn't send the file-shared email right now. Please try again in a moment.", ex);
+        } catch (Exception ex) {
+            log.error("Unexpected failure sending File Center email to {}: {}", maskEmail(to), ex.getMessage());
+            throw new EmailDeliveryException(
+                    "Couldn't send the file-shared email right now. Please try again in a moment.", ex);
+        }
+    }
+
+    private String buildFileSharedHtml(String employeeName, String introMessage, FileSharedEmailDetails d) {
+        String priorityColor = switch (nullSafe(d.priority())) {
+            case "Critical", "High" -> "#b91c1c";
+            case "Low" -> "#64748b";
+            default -> "#1d4ed8";
+        };
+        return """
+                <!DOCTYPE html>
+                <html>
+                <body style="margin:0;padding:0;background:#f1f5f9;font-family:'Segoe UI',Arial,sans-serif;">
+                  <table width="100%%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:32px 0;">
+                    <tr><td align="center">
+                      <table width="540" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,0.08);">
+                        <tr>
+                          <td style="background:linear-gradient(135deg,#1d4ed8,#3b82f6);padding:28px 32px;">
+                            <table cellpadding="0" cellspacing="0"><tr>
+                              <td style="width:38px;height:38px;background:#ffffff;border-radius:9px;text-align:center;vertical-align:middle;font-weight:800;color:#1d4ed8;font-size:15px;">H</td>
+                              <td style="padding-left:12px;">
+                                <div style="color:#ffffff;font-size:18px;font-weight:700;letter-spacing:0.3px;">Haoda File Center</div>
+                                <div style="color:#dbeafe;font-size:12.5px;margin-top:1px;">Enterprise IT Asset Management</div>
+                              </td>
+                            </tr></table>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style="padding:32px;">
+                            <div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:6px;">Hello %s,</div>
+                            <p style="font-size:13.5px;color:#475569;line-height:1.6;margin:0 0 22px;">%s</p>
+
+                            <table width="100%%" cellpadding="0" cellspacing="0" style="background:#f0f7ff;border:1px solid #bfdbfe;border-radius:10px;margin-bottom:22px;">
+                              <tr><td style="padding:16px 18px;">
+                                <div style="font-size:15px;font-weight:700;color:#1d4ed8;margin-bottom:10px;">📄 %s</div>
+                                <table width="100%%" cellpadding="0" cellspacing="0" style="font-size:12.5px;color:#334155;">
+                                  <tr><td style="padding:3px 0;color:#64748b;width:120px;">Category</td><td style="padding:3px 0;font-weight:600;">%s</td></tr>
+                                  <tr><td style="padding:3px 0;color:#64748b;">Version</td><td style="padding:3px 0;font-weight:600;">%s</td></tr>
+                                  <tr><td style="padding:3px 0;color:#64748b;">Priority</td><td style="padding:3px 0;font-weight:700;color:%s;">%s</td></tr>
+                                  <tr><td style="padding:3px 0;color:#64748b;">Uploaded By</td><td style="padding:3px 0;font-weight:600;">%s</td></tr>
+                                </table>
+                              </td></tr>
+                            </table>
+
+                            <table cellpadding="0" cellspacing="0" style="margin:0 auto 22px;">
+                              <tr><td style="border-radius:9px;background:linear-gradient(135deg,#1d4ed8,#3b82f6);">
+                                <a href="%s" style="display:inline-block;padding:13px 28px;font-size:13.5px;font-weight:700;color:#ffffff;text-decoration:none;">View &amp; Download File →</a>
+                              </td></tr>
+                            </table>
+
+                            <p style="font-size:12.5px;color:#64748b;line-height:1.6;margin:0 0 4px;text-align:center;">
+                              Or log in to <strong>Haoda Asset Management</strong> → <strong>File Center</strong> to access it any time.
+                            </p>
+                            <p style="font-size:11.5px;color:#94a3b8;line-height:1.6;margin:18px 0 0;text-align:center;">
+                              This link only works for your account and requires you to be logged in.
+                            </p>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style="padding:18px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;">
+                            <div style="font-size:11px;color:#94a3b8;">
+                              This is an automated message from Haoda File Center. Please do not reply directly to this email.
+                            </div>
+                            <div style="font-size:11px;color:#cbd5e1;margin-top:4px;">
+                              © %d Haoda Payments. All rights reserved.
+                            </div>
+                          </td>
+                        </tr>
+                      </table>
+                    </td></tr>
+                  </table>
+                </body>
+                </html>
+                """.formatted(
+                        employeeName, nullSafe(introMessage),
+                        nullSafe(d.fileTitle()), nullSafe(d.category()), nullSafe(d.version()),
+                        priorityColor, nullSafe(d.priority()), nullSafe(d.uploadedBy()),
+                        d.viewUrl(),
+                        java.time.Year.now().getValue()
+                );
+    }
+
     private String nullSafe(String value) {
         return (value == null || value.isBlank()) ? "—" : value;
     }
