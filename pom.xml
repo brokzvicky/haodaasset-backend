@@ -26,7 +26,24 @@
         <poi.version>5.2.5</poi.version>
         <zxing.version>3.5.3</zxing.version>
         <tess4j.version>5.11.0</tess4j.version>
+        <!-- AWS SDK v2 (Amazon S3 invoice storage) -->
+        <aws-sdk.version>2.29.24</aws-sdk.version>
     </properties>
+
+    <!-- Imports the AWS SDK v2 Bill of Materials so every software.amazon.awssdk
+         module (just "s3" for now) resolves to a single, tested, compatible
+         version set without having to pin each module's version by hand. -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${aws-sdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
 
@@ -131,6 +148,14 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- Amazon S3 (AWS SDK for Java v2) — used by S3Config / S3StorageService
+             to store, stream, and delete Service Billing invoice PDFs in
+             Amazon S3 instead of the local (ephemeral, on Render) filesystem. -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
         </dependency>
 
         <!-- Testing -->

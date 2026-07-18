@@ -5,16 +5,19 @@ import com.vikkash.assetmanagementv1.entity.ServiceBilling;
 import com.vikkash.assetmanagementv1.service.InvoiceExtractionService;
 import com.vikkash.assetmanagementv1.service.ServiceBillingReportService;
 import com.vikkash.assetmanagementv1.service.ServiceBillingService;
-import org.springframework.core.io.FileSystemResource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -31,6 +34,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/admin/service-billing")
 public class ServiceBillingController {
+
+    private static final Logger log = LoggerFactory.getLogger(ServiceBillingController.class);
 
     private final ServiceBillingService service;
     private final ServiceBillingReportService reportService;
@@ -220,24 +225,37 @@ public class ServiceBillingController {
         return ResponseEntity.ok(service.uploadInvoice(id, invoiceFile));
     }
 
-    /** Streams the PDF invoice inline so the browser can preview it (e.g. in a new tab). */
+    /**
+     * Streams the PDF invoice inline, directly from Amazon S3, so the browser
+     * can preview it (e.g. in a new tab). The object is never buffered fully
+     * in memory or written to local disk — bytes flow straight from the S3
+     * response stream into the HTTP response body.
+     */
     @GetMapping("/{id}/invoice/view")
-    public ResponseEntity<FileSystemResource> viewInvoice(@PathVariable Long id) {
-        Path file = service.resolveInvoiceFile(id);
-        return ResponseEntity.ok()
-                .contentType(MediaType.APPLICATION_PDF)
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + service.invoiceDownloadName(id) + "\"")
-                .body(new FileSystemResource(file));
+    public ResponseEntity<InputStreamResource> viewInvoice(@PathVariable Long id) {
+        return streamInvoice(id, "inline");
     }
 
-    /** Streams the PDF invoice as a downloadable attachment. */
+    /** Streams the PDF invoice as a downloadable attachment, directly from Amazon S3. */
     @GetMapping("/{id}/invoice/download")
-    public ResponseEntity<FileSystemResource> downloadInvoice(@PathVariable Long id) {
-        Path file = service.resolveInvoiceFile(id);
-        return ResponseEntity.ok()
+    public ResponseEntity<InputStreamResource> downloadInvoice(@PathVariable Long id) {
+        return streamInvoice(id, "attachment");
+    }
+
+    private ResponseEntity<InputStreamResource> streamInvoice(Long id, String disposition) {
+        ResponseInputStream<GetObjectResponse> s3Stream = service.streamInvoiceFile(id);
+        long contentLength = s3Stream.response().contentLength() != null ? s3Stream.response().contentLength() : -1;
+
+        log.info("Streaming invoice id={} from S3 (disposition={}, bytes={})", id, disposition, contentLength);
+
+        ResponseEntity.BodyBuilder responseBuilder = ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_PDF)
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + service.invoiceDownloadName(id) + "\"")
-                .body(new FileSystemResource(file));
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        disposition + "; filename=\"" + service.invoiceDownloadName(id) + "\"");
+        if (contentLength >= 0) {
+            responseBuilder.contentLength(contentLength);
+        }
+        return responseBuilder.body(new InputStreamResource(s3Stream));
     }
 
     @DeleteMapping("/{id}")

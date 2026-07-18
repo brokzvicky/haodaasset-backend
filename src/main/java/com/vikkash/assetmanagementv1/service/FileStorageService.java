@@ -68,6 +68,27 @@ public class FileStorageService {
                     "app.upload.dir is not set. Configure an absolute local-disk path, e.g. " +
                     "app.upload.dir=C:/HaodaAsset/uploads/invoices");
         }
+
+        // Fail-fast guard: a Windows-style drive path (e.g. "C:/...") is only
+        // absolute ON WINDOWS. On Linux/macOS (e.g. a deployed container) it is
+        // silently treated as RELATIVE and resolves under whatever the process's
+        // working directory happens to be (e.g. "/app/C:/HaodaAsset/..."). That
+        // failure mode is exactly what this whole rework was meant to eliminate,
+        // so it's better to refuse to start than to silently create a bogus
+        // nested folder that will look "empty" after every restart/redeploy.
+        boolean looksLikeWindowsPath = configuredUploadDir.matches("^[A-Za-z]:[/\\\\].*");
+        boolean runningOnWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
+        if (looksLikeWindowsPath && !runningOnWindows) {
+            throw new IllegalStateException(
+                    "app.upload.dir is set to a Windows-style path ('" + configuredUploadDir + "') but this " +
+                    "process is running on a non-Windows OS (os.name=" + System.getProperty("os.name") + "). " +
+                    "That path is NOT absolute on Linux/macOS and would silently resolve under the process's " +
+                    "working directory instead. Set the INVOICE_UPLOAD_DIR environment variable to a Linux-style " +
+                    "absolute path for this environment, e.g. INVOICE_UPLOAD_DIR=/var/data/uploads/invoices " +
+                    "(and make sure that location is on a persistent, mounted volume if this is a container/cloud " +
+                    "deployment — container filesystems are usually wiped on every restart/redeploy otherwise).");
+        }
+
         this.rootLocation = Paths.get(configuredUploadDir).toAbsolutePath().normalize();
         try {
             Files.createDirectories(rootLocation);

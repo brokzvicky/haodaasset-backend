@@ -13,9 +13,13 @@ import java.time.LocalDateTime;
  * "Service Billing" module (e.g. AMC renewals, internet/ISP bills,
  * software subscriptions, maintenance contracts, etc).
  *
- * invoicePath stores only the relative path to the uploaded PDF invoice on
- * disk (see ServiceBillingService for storage details) — the file itself
- * never lives in the database.
+ * invoicePath stores only the Amazon S3 object key of the uploaded PDF
+ * invoice (e.g. "invoices/3f2a1c9e-....pdf") — see S3StorageService /
+ * ServiceBillingService for storage details. The file itself never lives in
+ * the database, and no local disk path or bucket URL is ever stored here —
+ * just the key, which is portable across environments (e.g. between local
+ * dev and Render) and lets the backend regenerate a fresh stream/URL on
+ * demand.
  */
 @Entity
 @Table(
@@ -76,7 +80,7 @@ public class ServiceBilling {
     @NotBlank(message = "Status is required")
     private String status = "Pending";
 
-    /** Relative path (under the configured upload root) to the stored PDF invoice, if any. */
+    /** Amazon S3 object key of the stored PDF invoice, if any (column name kept as "invoice_path" for backward compatibility with existing data/migrations). */
     @Column(name = "invoice_path")
     private String invoicePath;
 

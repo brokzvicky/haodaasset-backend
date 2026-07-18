@@ -9,9 +9,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 
 import java.math.BigDecimal;
-import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -20,13 +21,14 @@ import java.util.Map;
  * All Service Billing business logic lives here: CRUD for payment records
  * plus secure storage/retrieval of the uploaded PDF invoices.
  *
- * Physical file storage is delegated to {@link FileStorageService}, which
- * writes to a fixed, absolute, configurable location on local disk
- * ({@code app.upload.dir}) — never to a relative path, and never to the
- * application's temporary directory. Only the resulting stored FILENAME
- * (a random UUID, never the original filename) is persisted on the
- * entity — the file bytes never touch the database, and the database never
- * stores a machine-specific absolute path either.
+ * Physical file storage is delegated to {@link S3StorageService}, which
+ * uploads to Amazon S3 (bucket configured via {@code aws.s3.bucket-name}) —
+ * never to local disk — so invoices survive redeploys/restarts on platforms
+ * like Render whose local filesystem is ephemeral. Only the resulting S3
+ * OBJECT KEY (a random UUID under the "invoices/" prefix, never the original
+ * filename) is persisted on the entity, in the existing {@code invoicePath}
+ * column — the file bytes never touch the database, and no machine-specific
+ * absolute path is ever stored.
  */
 @Service
 public class ServiceBillingService {
@@ -37,13 +39,13 @@ public class ServiceBillingService {
 
     private final ServiceBillingRepository repository;
     private final AuditLogService auditLogService;
-    private final FileStorageService fileStorageService;
+    private final S3StorageService s3StorageService;
 
     public ServiceBillingService(ServiceBillingRepository repository, AuditLogService auditLogService,
-                                  FileStorageService fileStorageService) {
+                                  S3StorageService s3StorageService) {
         this.repository = repository;
         this.auditLogService = auditLogService;
-        this.fileStorageService = fileStorageService;
+        this.s3StorageService = s3StorageService;
     }
 
     // ── Read ───────────────────────────────────────────────────────────────
@@ -244,28 +246,28 @@ public class ServiceBillingService {
     // ── Invoice file access (view / download) ───────────────────────────────
 
     /**
-     * Resolves the absolute path of a stored invoice on local disk, verifying
-     * it exists before returning it. Reads exclusively from the configured
-     * {@code app.upload.dir} location — never from a temp directory — so the
-     * behavior is identical whether the app was just started, restarted, or
-     * the machine itself was rebooted, as long as the configured folder and
-     * the files inside it are still there.
+     * Opens a live stream of the stored invoice directly from Amazon S3,
+     * verifying the object still exists before returning it, so the View and
+     * Download endpoints can pipe the bytes straight through to the browser
+     * without ever buffering the whole file on the backend or writing it to
+     * local disk.
+     *
+     * The caller (the controller) must close the returned stream once the
+     * HTTP response body has been written.
      */
     @Transactional(readOnly = true)
-    public Path resolveInvoiceFile(Long id) {
+    public ResponseInputStream<GetObjectResponse> streamInvoiceFile(Long id) {
         ServiceBilling billing = getById(id);
-        String storedName = billing.getInvoicePath();
-        if (storedName == null || storedName.isBlank()) {
+        String key = billing.getInvoicePath();
+        if (key == null || key.isBlank()) {
             throw new ResourceNotFoundException("No invoice has been uploaded for this payment.");
         }
-        if (!fileStorageService.exists(storedName)) {
+        if (!s3StorageService.exists(key)) {
             throw new ResourceNotFoundException(
-                    "The invoice file for this payment is missing from local disk at '"
-                            + fileStorageService.getRootLocation() + "'. It may have been deleted, moved, "
-                            + "or the app.upload.dir configuration changed since it was uploaded. "
-                            + "Please re-upload the invoice.");
+                    "The invoice file for this payment is missing from cloud storage (S3 key '" + key + "'). "
+                            + "It may have been deleted or moved since it was uploaded. Please re-upload the invoice.");
         }
-        return fileStorageService.resolve(storedName);
+        return s3StorageService.downloadFile(key);
     }
 
     @Transactional(readOnly = true)
@@ -279,20 +281,20 @@ public class ServiceBillingService {
     // ── Internal helpers ─────────────────────────────────────────────────────
 
     /**
-     * Validates and writes the file to local disk via {@link FileStorageService},
-     * then records only the returned stored filename (a random UUID) and the
-     * original filename (for download/display purposes only — never used to
-     * locate the file on disk) on the entity.
+     * Validates and uploads the file to Amazon S3 via {@link S3StorageService},
+     * then records only the returned S3 object key (a random UUID under the
+     * "invoices/" prefix) and the original filename (for download/display
+     * purposes only — never used to locate the object in S3) on the entity.
      */
     private void storeInvoice(ServiceBilling billing, MultipartFile file) {
         String originalName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "invoice.pdf";
-        String storedName = fileStorageService.store(file); // throws IllegalArgumentException for bad type/size
-        billing.setInvoicePath(storedName);
+        String key = s3StorageService.uploadFile(file); // throws IllegalArgumentException for bad type/size
+        billing.setInvoicePath(key);
         billing.setInvoiceOriginalName(originalName);
     }
 
-    private void deleteInvoiceFileQuietly(String storedName) {
-        fileStorageService.delete(storedName);
+    private void deleteInvoiceFileQuietly(String key) {
+        s3StorageService.deleteFile(key);
     }
 
     private String blankToNull(String value) {
