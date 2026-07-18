@@ -59,6 +59,18 @@ public class AssetController {
     }
 
     /**
+     * Fetch a single asset by its ID — powers the dedicated Asset Details
+     * page (/assets/:id) so it can load directly (e.g. on refresh or a
+     * shared link) without depending on the full asset list already being
+     * in memory. Throws ResourceNotFoundException (→ 404 via
+     * GlobalExceptionHandler) when no asset exists with that ID.
+     */
+    @GetMapping("/{id}")
+    public Asset getAssetById(@PathVariable Long id) {
+        return assetService.getById(id);
+    }
+
+    /**
      * Diagnostic, read-only: lists every "Assigned" asset whose employeeId
      * link is broken (missing, or pointing at an employeeId that doesn't
      * exist). These are the assets that show a name on this page but won't
