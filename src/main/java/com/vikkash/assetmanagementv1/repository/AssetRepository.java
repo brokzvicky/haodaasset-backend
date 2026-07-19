@@ -3,6 +3,7 @@ package com.vikkash.assetmanagementv1.repository;
 import com.vikkash.assetmanagementv1.entity.Asset;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -23,4 +24,21 @@ public interface AssetRepository extends JpaRepository<Asset, Long>, JpaSpecific
 
     // ── Serial number uniqueness check (used before saving) ───────────────
     boolean existsBySerialNumber(String serialNumber);
+
+    // ── Distinct value vocab, used by the AI Search intent parser to
+    //    validate/typo-correct terms against real live data (never guessed) ──
+    @Query("SELECT DISTINCT a.brand FROM Asset a WHERE a.brand IS NOT NULL AND a.brand <> ''")
+    List<String> findDistinctBrands();
+
+    @Query("SELECT DISTINCT a.assetType FROM Asset a WHERE a.assetType IS NOT NULL AND a.assetType <> ''")
+    List<String> findDistinctAssetTypes();
+
+    @Query("SELECT DISTINCT a.location FROM Asset a WHERE a.location IS NOT NULL AND a.location <> ''")
+    List<String> findDistinctLocations();
+
+    @Query("SELECT DISTINCT a.assetStatus FROM Asset a WHERE a.assetStatus IS NOT NULL AND a.assetStatus <> ''")
+    List<String> findDistinctStatuses();
+
+    @Query("SELECT DISTINCT a.employeeName FROM Asset a WHERE a.employeeName IS NOT NULL AND a.employeeName <> ''")
+    List<String> findDistinctEmployeeNames();
 }

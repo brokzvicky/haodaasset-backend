@@ -50,6 +50,10 @@ public class SecurityConfig {
                 // ── Employee self-service + admin can also call these ──
                 .requestMatchers("/api/employee/**").hasAnyRole("EMPLOYEE", "ADMIN")
 
+                // ── AI Search Assistant — both roles; results are scoped to the
+                //    caller's own assets inside AiSearchService for employees ──
+                .requestMatchers("/api/ai/**").hasAnyRole("EMPLOYEE", "ADMIN")
+
                 // ── Everything else requires authentication ──
                 .anyRequest().authenticated()
             )
