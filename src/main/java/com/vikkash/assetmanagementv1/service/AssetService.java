@@ -222,6 +222,9 @@ public class AssetService {
         asset.setAssignedDate(effectiveAssignedDate);
         asset.setReason(request.getRemarks());
         asset.setAssetStatus("Assigned");
+        // Preserved even after a future return, for the Separation module's "Returned Assets" history
+        asset.setLastEmployeeId(employee.getEmployeeId());
+        asset.setLastEmployeeName(employee.getEmployeeName());
         // Clear any previous return tracking on reassignment
         asset.setReturnedStatus(null);
         asset.setReturnDate(null);

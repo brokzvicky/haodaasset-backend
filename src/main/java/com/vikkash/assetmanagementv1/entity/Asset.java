@@ -31,6 +31,19 @@ public class Asset {
     private String employeeName;
     private String employeeRole;
 
+    /**
+     * Preserves who most recently held this asset, even after it's returned
+     * (unlike employeeId/employeeName above, which are cleared on return).
+     * Overwritten only when the asset is assigned to someone new. Lets the
+     * Employee Separation module show an employee's "Returned Assets"
+     * history without needing a separate assignment-history table.
+     */
+    @Column(name = "last_employee_id")
+    private String lastEmployeeId;
+
+    @Column(name = "last_employee_name")
+    private String lastEmployeeName;
+
     // ── Core asset fields ──────────────────────────────────────────────────
     @NotBlank(message = "Asset type is required")
     private String assetType;
@@ -144,6 +157,12 @@ public class Asset {
 
     public String getEmployeeRole() { return employeeRole; }
     public void setEmployeeRole(String employeeRole) { this.employeeRole = employeeRole; }
+
+    public String getLastEmployeeId() { return lastEmployeeId; }
+    public void setLastEmployeeId(String lastEmployeeId) { this.lastEmployeeId = lastEmployeeId; }
+
+    public String getLastEmployeeName() { return lastEmployeeName; }
+    public void setLastEmployeeName(String lastEmployeeName) { this.lastEmployeeName = lastEmployeeName; }
 
     public String getAssetType() { return assetType; }
     public void setAssetType(String assetType) { this.assetType = assetType; }

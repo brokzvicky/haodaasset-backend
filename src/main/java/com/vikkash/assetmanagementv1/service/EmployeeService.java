@@ -3,12 +3,16 @@ package com.vikkash.assetmanagementv1.service;
 import com.vikkash.assetmanagementv1.dto.ChangePasswordRequest;
 import com.vikkash.assetmanagementv1.dto.EmployeeCreateRequest;
 import com.vikkash.assetmanagementv1.dto.EmployeeLoginRequest;
+import com.vikkash.assetmanagementv1.dto.EmployeeSeparationDetailDTO;
 import com.vikkash.assetmanagementv1.dto.EmployeeUpdateRequest;
+import com.vikkash.assetmanagementv1.dto.InitiateSeparationRequest;
 import com.vikkash.assetmanagementv1.dto.LoginResponse;
 import com.vikkash.assetmanagementv1.entity.Asset;
 import com.vikkash.assetmanagementv1.entity.Employee;
+import com.vikkash.assetmanagementv1.entity.EmploymentStatus;
 import com.vikkash.assetmanagementv1.exception.DuplicateResourceException;
 import com.vikkash.assetmanagementv1.exception.InvalidCredentialsException;
+import com.vikkash.assetmanagementv1.exception.PendingAssetReturnException;
 import com.vikkash.assetmanagementv1.exception.ResourceNotFoundException;
 import com.vikkash.assetmanagementv1.repository.AssetRepository;
 import com.vikkash.assetmanagementv1.repository.EmployeeRepository;
@@ -19,7 +23,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class EmployeeService {
@@ -34,17 +42,20 @@ public class EmployeeService {
     private final PasswordEncoder    passwordEncoder;
     private final JwtUtil            jwtUtil;
     private final AuditLogService    auditLogService;
+    private final SeparationNotificationService separationNotificationService;
 
     public EmployeeService(EmployeeRepository employeeRepository,
                            AssetRepository assetRepository,
                            PasswordEncoder passwordEncoder,
                            JwtUtil jwtUtil,
-                           AuditLogService auditLogService) {
+                           AuditLogService auditLogService,
+                           SeparationNotificationService separationNotificationService) {
         this.employeeRepository = employeeRepository;
         this.assetRepository    = assetRepository;
         this.passwordEncoder    = passwordEncoder;
         this.jwtUtil            = jwtUtil;
         this.auditLogService    = auditLogService;
+        this.separationNotificationService = separationNotificationService;
     }
 
     // ── Authentication ─────────────────────────────────────────────────────
@@ -120,6 +131,7 @@ public class EmployeeService {
         employee.setDepartment(request.getDepartment());
         employee.setDesignation(request.getDesignation());
         employee.setLocation(request.getLocation());
+        employee.setJoiningDate(request.getJoiningDate());
         employee.setRole("EMPLOYEE");
         employee.setPassword(passwordEncoder.encode(DEFAULT_PASSWORD));
         employee.setMustChangePassword(true);  // force change on first login
@@ -168,6 +180,7 @@ public class EmployeeService {
         employee.setDepartment(request.getDepartment());
         employee.setDesignation(request.getDesignation());
         employee.setLocation(request.getLocation());
+        employee.setJoiningDate(request.getJoiningDate());
 
         Employee saved = employeeRepository.save(employee);
 
@@ -263,5 +276,180 @@ public class EmployeeService {
     @Transactional(readOnly = true)
     public List<Asset> getAssetsForEmployee(String employeeId) {
         return assetRepository.findByEmployeeId(employeeId.trim().toUpperCase());
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //  EMPLOYEE SEPARATION / RESIGNATION WORKFLOW
+    //  Active → Notice Period → Exit Clearance → Assets Returned → Resigned
+    //  Employees are NEVER deleted as part of this flow — only their
+    //  employmentStatus and separation fields change, so full employment
+    //  history remains queryable forever.
+    // ═════════════════════════════════════════════════════════════════════
+
+    /** Full separation detail for the Employee Separation Modal / Separation History section. */
+    @Transactional(readOnly = true)
+    public EmployeeSeparationDetailDTO getSeparationDetail(String employeeId) {
+        Employee employee = getByEmployeeId(employeeId);
+        List<Asset> assigned = assetRepository.findByEmployeeId(employee.getEmployeeId()).stream()
+                .filter(a -> "Assigned".equals(a.getAssetStatus()))
+                .collect(Collectors.toList());
+        List<Asset> returned = assetRepository.findByLastEmployeeIdAndEmployeeIdIsNull(employee.getEmployeeId());
+        return EmployeeSeparationDetailDTO.from(employee, assigned, returned);
+    }
+
+    /** Step 1: Active → Notice Period. Kicks off the resignation and notifies HR. */
+    @Transactional
+    public EmployeeSeparationDetailDTO initiateSeparation(String employeeId, InitiateSeparationRequest request) {
+        Employee employee = getByEmployeeId(employeeId);
+
+        if (EmploymentStatus.RESIGNED.equals(employee.getEmploymentStatus())) {
+            throw new IllegalArgumentException(
+                    "This employee is already Resigned. Reactivate them first if you need to restart separation.");
+        }
+        if (!EmploymentStatus.ACTIVE.equals(employee.getEmploymentStatus())) {
+            throw new IllegalArgumentException(
+                    "A separation is already in progress for this employee (status: " + employee.getEmploymentStatus() + ").");
+        }
+
+        employee.setEmploymentStatus(EmploymentStatus.NOTICE_PERIOD);
+        employee.setNoticeStartDate(request.getNoticeStartDate());
+        employee.setLastWorkingDate(request.getLastWorkingDate());
+        employee.setResignationReason(request.getResignationReason());
+        employee.setNoticePeriodDays(request.getNoticePeriodDays());
+        employee.setSeparationRemarks(request.getRemarks());
+        employee.setExitClearanceStatus(EmploymentStatus.CLEARANCE_PENDING);
+        employee.setClearanceCompletionDate(null);
+        employee.setResignedDate(null);
+
+        Employee saved = employeeRepository.save(employee);
+        auditLogService.record("EMPLOYEE", saved.getEmployeeId(), "SEPARATION_INITIATED",
+                "Resignation started for " + saved.getEmployeeName() + " — reason: " + request.getResignationReason()
+                        + ", last working date: " + request.getLastWorkingDate());
+        separationNotificationService.notifySeparationStarted(saved);
+
+        return getSeparationDetail(saved.getEmployeeId());
+    }
+
+    /** Step 2: Notice Period → Exit Clearance. Notifies IT to collect any still-assigned assets. */
+    @Transactional
+    public EmployeeSeparationDetailDTO moveToExitClearance(String employeeId, SeparationRemarksRequest request) {
+        Employee employee = getByEmployeeId(employeeId);
+
+        if (!EmploymentStatus.NOTICE_PERIOD.equals(employee.getEmploymentStatus())) {
+            throw new IllegalArgumentException(
+                    "Employee must be in Notice Period to move to Exit Clearance (current status: "
+                            + employee.getEmploymentStatus() + ").");
+        }
+
+        employee.setEmploymentStatus(EmploymentStatus.EXIT_CLEARANCE);
+        if (request != null && request.getRemarks() != null && !request.getRemarks().isBlank()) {
+            employee.setSeparationRemarks(request.getRemarks());
+        }
+        Employee saved = employeeRepository.save(employee);
+
+        long pendingAssets = assetRepository.countByAssetStatusAndEmployeeId("Assigned", saved.getEmployeeId());
+        auditLogService.record("EMPLOYEE", saved.getEmployeeId(), "SEPARATION_EXIT_CLEARANCE",
+                "Moved to Exit Clearance for " + saved.getEmployeeName() + " — " + pendingAssets + " asset(s) pending return");
+        separationNotificationService.notifyAssetCollectionRequired(saved, (int) pendingAssets);
+
+        return getSeparationDetail(saved.getEmployeeId());
+    }
+
+    /**
+     * Step 3 (validation gate): attempts to finalize the resignation. BLOCKED with a
+     * {@link PendingAssetReturnException} listing every still-assigned asset if any
+     * remain — per spec, resignation cannot complete until all assets are returned.
+     * On success, moves the employee through Assets Returned → Resigned in one step
+     * (both flags reflect reality the instant the asset check passes) and notifies Admin.
+     */
+    @Transactional
+    public EmployeeSeparationDetailDTO completeResignation(String employeeId, SeparationRemarksRequest request) {
+        Employee employee = getByEmployeeId(employeeId);
+
+        if (EmploymentStatus.RESIGNED.equals(employee.getEmploymentStatus())) {
+            throw new IllegalArgumentException("This employee is already marked Resigned.");
+        }
+        if (EmploymentStatus.ACTIVE.equals(employee.getEmploymentStatus())) {
+            throw new IllegalArgumentException("Separation has not been initiated for this employee yet.");
+        }
+
+        List<Asset> stillAssigned = assetRepository.findByEmployeeId(employee.getEmployeeId()).stream()
+                .filter(a -> "Assigned".equals(a.getAssetStatus()))
+                .collect(Collectors.toList());
+        if (!stillAssigned.isEmpty()) {
+            throw new PendingAssetReturnException(stillAssigned);
+        }
+
+        String today = LocalDate.now().toString();
+        employee.setEmploymentStatus(EmploymentStatus.ASSETS_RETURNED);
+        employee.setExitClearanceStatus(EmploymentStatus.CLEARANCE_COMPLETED);
+        employee.setClearanceCompletionDate(today);
+        if (request != null && request.getRemarks() != null && !request.getRemarks().isBlank()) {
+            employee.setSeparationRemarks(request.getRemarks());
+        }
+        employeeRepository.save(employee);
+        separationNotificationService.notifyClearanceComplete(employee);
+
+        employee.setEmploymentStatus(EmploymentStatus.RESIGNED);
+        employee.setResignedDate(today);
+        Employee saved = employeeRepository.save(employee);
+
+        auditLogService.record("EMPLOYEE", saved.getEmployeeId(), "SEPARATION_COMPLETED",
+                "Resignation finalized for " + saved.getEmployeeName() + " as of " + today
+                        + " — all assets confirmed returned.");
+        separationNotificationService.notifyResignationFinalized(saved);
+
+        return getSeparationDetail(saved.getEmployeeId());
+    }
+
+    /** Cancels an in-progress separation and restores the employee to Active (e.g. resignation withdrawn). */
+    @Transactional
+    public EmployeeSeparationDetailDTO cancelSeparation(String employeeId, SeparationRemarksRequest request) {
+        Employee employee = getByEmployeeId(employeeId);
+
+        if (EmploymentStatus.ACTIVE.equals(employee.getEmploymentStatus())) {
+            throw new IllegalArgumentException("This employee is already Active — there is no separation to cancel.");
+        }
+        if (EmploymentStatus.RESIGNED.equals(employee.getEmploymentStatus())) {
+            throw new IllegalArgumentException(
+                    "This employee is already Resigned. Use Reactivate instead if they are rejoining.");
+        }
+
+        employee.setEmploymentStatus(EmploymentStatus.ACTIVE);
+        employee.setNoticeStartDate(null);
+        employee.setLastWorkingDate(null);
+        employee.setResignationReason(null);
+        employee.setNoticePeriodDays(null);
+        employee.setExitClearanceStatus(EmploymentStatus.CLEARANCE_PENDING);
+        employee.setClearanceCompletionDate(null);
+        employee.setResignedDate(null);
+        employee.setSeparationRemarks(request != null ? request.getRemarks() : null);
+
+        Employee saved = employeeRepository.save(employee);
+        auditLogService.record("EMPLOYEE", saved.getEmployeeId(), "SEPARATION_CANCELLED",
+                "Separation cancelled for " + saved.getEmployeeName() + " — restored to Active");
+
+        return getSeparationDetail(saved.getEmployeeId());
+    }
+
+    /** Dashboard widgets: Notice Period / Pending Exit Clearance / Resigned This Month / Pending Asset Returns. */
+    @Transactional(readOnly = true)
+    public Map<String, Long> getSeparationDashboardStats() {
+        YearMonth thisMonth = YearMonth.now();
+        String monthStart = thisMonth.atDay(1).toString();
+        String monthEnd = thisMonth.atEndOfMonth().toString();
+
+        return Map.of(
+                "noticePeriod", employeeRepository.countByEmploymentStatus(EmploymentStatus.NOTICE_PERIOD),
+                "pendingExitClearance", employeeRepository.countPendingExitClearance(),
+                "resignedThisMonth", employeeRepository.countResignedBetween(monthStart, monthEnd),
+                "pendingAssetReturns", assetRepository.countPendingAssetReturnsAcrossSeparatingEmployees()
+        );
+    }
+
+    /** Every employee currently anywhere in the separation pipeline (or already Resigned) — feeds the Employee Exit Report. */
+    @Transactional(readOnly = true)
+    public List<Employee> getAllInSeparation() {
+        return employeeRepository.findAllInSeparation();
     }
 }

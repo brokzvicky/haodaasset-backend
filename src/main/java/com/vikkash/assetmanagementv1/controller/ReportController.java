@@ -1,6 +1,8 @@
 package com.vikkash.assetmanagementv1.controller;
 
 import com.vikkash.assetmanagementv1.service.AnalyticsService;
+import com.vikkash.assetmanagementv1.service.EmployeeExitReportService;
+import com.vikkash.assetmanagementv1.service.EmployeeService;
 import com.vikkash.assetmanagementv1.service.ReportService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -24,10 +26,15 @@ public class ReportController {
 
     private final ReportService reportService;
     private final AnalyticsService analyticsService;
+    private final EmployeeService employeeService;
+    private final EmployeeExitReportService employeeExitReportService;
 
-    public ReportController(ReportService reportService, AnalyticsService analyticsService) {
+    public ReportController(ReportService reportService, AnalyticsService analyticsService,
+                             EmployeeService employeeService, EmployeeExitReportService employeeExitReportService) {
         this.reportService = reportService;
         this.analyticsService = analyticsService;
+        this.employeeService = employeeService;
+        this.employeeExitReportService = employeeExitReportService;
     }
 
     /**
@@ -56,5 +63,38 @@ public class ReportController {
                 .contentType(MediaType.APPLICATION_PDF)
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
                 .body(pdf);
+    }
+
+    /**
+     * GET /api/admin/reports/employee-exit-report/pdf
+     * Streams a PDF of every employee currently in the separation pipeline
+     * (Notice Period → Resigned), with dates, reason, and clearance status.
+     */
+    @GetMapping("/employee-exit-report/pdf")
+    public ResponseEntity<byte[]> employeeExitReportPdf() throws IOException {
+        byte[] pdf = employeeExitReportService.generatePdf(employeeService.getAllInSeparation());
+        String filename = "employee-exit-report-" +
+                LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")) + ".pdf";
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .body(pdf);
+    }
+
+    /**
+     * GET /api/admin/reports/employee-exit-report/excel
+     * Same dataset as the PDF export, as an .xlsx workbook.
+     */
+    @GetMapping("/employee-exit-report/excel")
+    public ResponseEntity<byte[]> employeeExitReportExcel() throws IOException {
+        byte[] excel = employeeExitReportService.generateExcel(employeeService.getAllInSeparation());
+        String filename = "employee-exit-report-" +
+                LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")) + ".xlsx";
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .body(excel);
     }
 }

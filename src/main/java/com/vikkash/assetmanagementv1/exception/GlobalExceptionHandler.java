@@ -77,6 +77,29 @@ public class GlobalExceptionHandler {
                 "The uploaded file is too large. Maximum size is " + configuredMaxFileSize + ".", req);
     }
 
+    /**
+     * Blocked resignation: one or more assets are still assigned. Returns 409
+     * (state conflict, not a bad request) with the pending assets attached to
+     * `details` so the UI can list exactly what needs to be returned first.
+     */
+    @ExceptionHandler(PendingAssetReturnException.class)
+    public ResponseEntity<ApiError> handlePendingAssetReturn(PendingAssetReturnException ex, HttpServletRequest req) {
+        log.debug("Resignation blocked at {}: {}", req.getRequestURI(), ex.getMessage());
+        ApiError body = new ApiError(HttpStatus.CONFLICT.value(), "Conflict", ex.getMessage(), req.getRequestURI());
+        java.util.List<java.util.Map<String, String>> summary = ex.getPendingAssets().stream()
+                .map(a -> {
+                    java.util.Map<String, String> m = new HashMap<>();
+                    m.put("assetId", String.valueOf(a.getAssetId()));
+                    m.put("laptopName", a.getLaptopName());
+                    m.put("assetType", a.getAssetType());
+                    m.put("serialNumber", a.getSerialNumber());
+                    return m;
+                })
+                .toList();
+        body.setDetails(summary);
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiError> handleIllegalArgument(IllegalArgumentException ex, HttpServletRequest req) {
         log.debug("Bad request at {}: {}", req.getRequestURI(), ex.getMessage());

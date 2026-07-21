@@ -20,7 +20,17 @@ public class EmployeeCreateRequest {
 
     private String location;
 
+    private String joiningDate;
+
     public EmployeeCreateRequest() {
+    }
+
+    public String getJoiningDate() {
+        return joiningDate;
+    }
+
+    public void setJoiningDate(String joiningDate) {
+        this.joiningDate = joiningDate;
     }
 
     public String getEmployeeId() {

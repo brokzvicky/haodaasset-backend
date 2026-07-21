@@ -13,6 +13,13 @@ public class ApiError {
     private String path;
     private Map<String, String> fieldErrors;
 
+    /**
+     * Populated only for PendingAssetReturnException: a lightweight summary
+     * of each asset still blocking the resignation, so the frontend can list
+     * them without a follow-up call.
+     */
+    private Object details;
+
     public ApiError() {
     }
 
@@ -65,5 +72,13 @@ public class ApiError {
 
     public void setFieldErrors(Map<String, String> fieldErrors) {
         this.fieldErrors = fieldErrors;
+    }
+
+    public Object getDetails() {
+        return details;
+    }
+
+    public void setDetails(Object details) {
+        this.details = details;
     }
 }

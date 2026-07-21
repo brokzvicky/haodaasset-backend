@@ -22,6 +22,20 @@ public interface AssetRepository extends JpaRepository<Asset, Long>, JpaSpecific
     List<Asset> findByEmployeeId(String employeeId);
     Optional<Asset> findBySerialNumber(String serialNumber);
 
+    /**
+     * Assets this employee most recently held but are no longer assigned to
+     * anyone (i.e. returned, not reassigned onward) — powers the "Returned
+     * Assets" list in the Employee Separation module.
+     */
+    List<Asset> findByLastEmployeeIdAndEmployeeIdIsNull(String lastEmployeeId);
+
+    long countByAssetStatusAndEmployeeId(String assetStatus, String employeeId);
+
+    /** Total assets still assigned to any employee currently in the separation workflow — dashboard "Pending Asset Returns" widget. */
+    @Query("SELECT COUNT(a) FROM Asset a WHERE a.assetStatus = 'Assigned' AND a.employeeId IN " +
+           "(SELECT e.employeeId FROM Employee e WHERE e.employmentStatus IN ('Notice Period', 'Exit Clearance', 'Assets Returned'))")
+    long countPendingAssetReturnsAcrossSeparatingEmployees();
+
     // ── Serial number uniqueness check (used before saving) ───────────────
     boolean existsBySerialNumber(String serialNumber);
 

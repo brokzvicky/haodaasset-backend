@@ -27,6 +27,16 @@ public class EmployeeUpdateRequest {
 
     private String location;
 
+    private String joiningDate;
+
+    public String getJoiningDate() {
+        return joiningDate;
+    }
+
+    public void setJoiningDate(String joiningDate) {
+        this.joiningDate = joiningDate;
+    }
+
     public String getEmployeeName() {
         return employeeName;
     }

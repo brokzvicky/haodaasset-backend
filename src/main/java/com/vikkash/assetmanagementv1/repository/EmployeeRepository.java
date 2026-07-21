@@ -27,4 +27,22 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long> {
 
     /** Resolves "assets in Finance" → the list of employeeIds in that department (partial, case-insensitive). */
     List<Employee> findByDepartmentContainingIgnoreCase(String department);
+
+    // ── Separation / employment-lifecycle queries ───────────────────────────
+
+    List<Employee> findByEmploymentStatus(String employmentStatus);
+
+    long countByEmploymentStatus(String employmentStatus);
+
+    /** Exit clearance still outstanding: anyone past Active but not yet Resigned. */
+    @Query("SELECT COUNT(e) FROM Employee e WHERE e.employmentStatus NOT IN ('Active', 'Resigned')")
+    long countPendingExitClearance();
+
+    @Query("SELECT COUNT(e) FROM Employee e WHERE e.employmentStatus = 'Resigned' " +
+           "AND e.resignedDate >= :monthStart AND e.resignedDate <= :monthEnd")
+    long countResignedBetween(String monthStart, String monthEnd);
+
+    /** Employees currently in any separation stage (used by the Employee Exit Report). */
+    @Query("SELECT e FROM Employee e WHERE e.employmentStatus <> 'Active' ORDER BY e.noticeStartDate DESC NULLS LAST")
+    List<Employee> findAllInSeparation();
 }
