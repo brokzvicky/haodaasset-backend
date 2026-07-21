@@ -22,6 +22,24 @@ public interface AssetRepository extends JpaRepository<Asset, Long>, JpaSpecific
     List<Asset> findByEmployeeId(String employeeId);
     Optional<Asset> findBySerialNumber(String serialNumber);
 
+    // ── Used by the AI Chat Assistant ("where is asset X", "who owns X") ──
+    List<Asset> findBySerialNumberContainingIgnoreCase(String serialNumber);
+    List<Asset> findByLaptopNameContainingIgnoreCase(String laptopName);
+
+    /**
+     * Per-employee asset counts, highest first — powers "which employee has
+     * the most assets" style chat questions. Only counts currently-assigned
+     * assets (employeeId not null); unassigned stock never appears here.
+     */
+    @Query("SELECT a.employeeId, a.employeeName, COUNT(a) FROM Asset a " +
+           "WHERE a.employeeId IS NOT NULL AND a.employeeId <> '' " +
+           "GROUP BY a.employeeId, a.employeeName ORDER BY COUNT(a) DESC")
+    List<Object[]> countAssetsGroupedByEmployee();
+
+    /** All assets with a non-blank warranty date, for month/expiry-window checks done in Java (dates are stored as strings). */
+    @Query("SELECT a FROM Asset a WHERE a.warrantyExpiry IS NOT NULL AND a.warrantyExpiry <> ''")
+    List<Asset> findAllWithWarrantyDate();
+
     /**
      * Assets this employee most recently held but are no longer assigned to
      * anyone (i.e. returned, not reassigned onward) — powers the "Returned
