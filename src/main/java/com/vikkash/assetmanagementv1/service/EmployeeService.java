@@ -7,6 +7,7 @@ import com.vikkash.assetmanagementv1.dto.EmployeeSeparationDetailDTO;
 import com.vikkash.assetmanagementv1.dto.EmployeeUpdateRequest;
 import com.vikkash.assetmanagementv1.dto.InitiateSeparationRequest;
 import com.vikkash.assetmanagementv1.dto.LoginResponse;
+import com.vikkash.assetmanagementv1.dto.SeparationRemarksRequest;
 import com.vikkash.assetmanagementv1.entity.Asset;
 import com.vikkash.assetmanagementv1.entity.Employee;
 import com.vikkash.assetmanagementv1.entity.EmploymentStatus;
