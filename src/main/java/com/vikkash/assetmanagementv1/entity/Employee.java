@@ -46,7 +46,8 @@ import jakarta.persistence.*;
     // when, and why) stays queryable forever.
     //
     // Active -> Notice Period -> Exit Clearance -> Assets Returned -> Resigned
-    @Column(name = "employment_status", length = 30, nullable = false)
+    @Column(name = "employment_status", length = 30, nullable = false,
+            columnDefinition = "varchar(30) default 'Active'")
     private String employmentStatus = "Active";
 
     /** Date the employee joined the organization (yyyy-MM-dd string, matching the rest of the codebase's date convention). */
