@@ -250,11 +250,24 @@ public class AiChatService {
         AiChatResponse r = new AiChatResponse();
         r.setType("ASSETS");
         r.setAssets(searchResult.getResults());
-        if (searchResult.getResultCount() == 0) {
+
+        // A query can legitimately return zero results while still having been
+        // understood perfectly (e.g. "unassigned laptops" when there simply
+        // aren't any right now) — that's a real, useful answer, not a parsing
+        // failure, and needs a different message than "I didn't understand you".
+        boolean understoodNothing = searchResult.getMatchedTerms() == null || searchResult.getMatchedTerms().isEmpty();
+
+        if (searchResult.getResultCount() == 0 && understoodNothing) {
             r.setAnswer("I couldn't find anything matching that. Try rephrasing, or ask about a specific asset by name/serial number.");
             r.setSuggestions(defaultSuggestions(isAdmin));
         } else {
+            // Covers both "results found" and "understood but zero results" —
+            // AiSearchService's own summary already phrases the zero-result
+            // case accurately (what was searched for, and that nothing matched it).
             r.setAnswer(searchResult.getSummary());
+            if (searchResult.getResultCount() == 0) {
+                r.setSuggestions(defaultSuggestions(isAdmin));
+            }
         }
         return r;
     }
