@@ -3,12 +3,17 @@ package com.vikkash.assetmanagementv1.service;
 import com.vikkash.assetmanagementv1.dto.AdminLoginRequest;
 import com.vikkash.assetmanagementv1.dto.AdminLoginResponse;
 import com.vikkash.assetmanagementv1.dto.LoginResponse;
+import com.vikkash.assetmanagementv1.dto.MeResponse;
 import com.vikkash.assetmanagementv1.dto.OtpRequestResponse;
 import com.vikkash.assetmanagementv1.entity.Admin;
+import com.vikkash.assetmanagementv1.entity.AuthProvider;
+import com.vikkash.assetmanagementv1.entity.Permission;
+import com.vikkash.assetmanagementv1.entity.Role;
 import com.vikkash.assetmanagementv1.exception.InvalidCredentialsException;
 import com.vikkash.assetmanagementv1.exception.OtpException;
 import com.vikkash.assetmanagementv1.exception.ResourceNotFoundException;
 import com.vikkash.assetmanagementv1.repository.AdminRepository;
+import com.vikkash.assetmanagementv1.security.GoogleTokenVerifier;
 import com.vikkash.assetmanagementv1.security.JwtUtil;
 import com.vikkash.assetmanagementv1.security.OtpService;
 import com.vikkash.assetmanagementv1.security.PasswordResetTokenService;
@@ -19,6 +24,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
 
 @Service
 public class AdminService {
@@ -34,6 +41,9 @@ public class AdminService {
     /** Separate namespace for the admin login 2FA OTP. */
     private static final String LOGIN_2FA_NAMESPACE = "login2fa:";
 
+    /** Separate namespace for the "Login with Mobile" OTP flow. */
+    private static final String MOBILE_LOGIN_NAMESPACE = "adminmobilelogin:";
+
     private final AdminRepository adminRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
@@ -41,6 +51,8 @@ public class AdminService {
     private final EmailService emailService;
     private final PasswordResetTokenService resetTokenService;
     private final TwoFactorTokenService twoFactorTokenService;
+    private final GoogleTokenVerifier googleTokenVerifier;
+    private final SmsService smsService;
 
     /**
      * Every admin login OTP is sent here rather than to the individual
@@ -54,7 +66,9 @@ public class AdminService {
     public AdminService(AdminRepository adminRepository, PasswordEncoder passwordEncoder, JwtUtil jwtUtil,
                          OtpService otpService, EmailService emailService,
                          PasswordResetTokenService resetTokenService,
-                         TwoFactorTokenService twoFactorTokenService) {
+                         TwoFactorTokenService twoFactorTokenService,
+                         GoogleTokenVerifier googleTokenVerifier,
+                         SmsService smsService) {
         this.adminRepository = adminRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
@@ -62,6 +76,8 @@ public class AdminService {
         this.emailService = emailService;
         this.resetTokenService = resetTokenService;
         this.twoFactorTokenService = twoFactorTokenService;
+        this.googleTokenVerifier = googleTokenVerifier;
+        this.smsService = smsService;
     }
 
     /**
@@ -131,10 +147,94 @@ public class AdminService {
     }
 
     private LoginResponse issueLoginResponse(Admin admin) {
-        String token = jwtUtil.generateToken(admin.getUsername(), "ADMIN");
+        String token = jwtUtil.generateToken(admin.getUsername(), "ADMIN", permissionCodes(admin.getRoleRef()));
         LoginResponse response = LoginResponse.forAdmin(token, admin.getUsername());
         response.setEmail(admin.getEmail());
         return response;
+    }
+
+    /** Fine-grained permission codes from this admin's assigned Role (empty list if none assigned yet). */
+    private List<String> permissionCodes(Role role) {
+        if (role == null) return List.of();
+        return role.getPermissions().stream().map(Permission::getCode).toList();
+    }
+
+    // ── Google Sign-In ───────────────────────────────────────────────────
+    // Deliberately does NOT auto-provision new admin accounts: an admin
+    // account is a privileged, IT-provisioned identity, so signing in with
+    // Google only succeeds if that Google account's email (or a previously
+    // linked googleId) already matches an existing admin row. Skips the
+    // internal email-OTP 2FA challenge, since Google's own sign-in already
+    // constitutes a strong second factor.
+    @Transactional
+    public LoginResponse loginWithGoogle(String idToken) {
+        GoogleTokenVerifier.VerifiedGoogleIdentity identity = googleTokenVerifier.verify(idToken);
+
+        Admin admin = adminRepository.findByGoogleId(identity.googleId)
+                .or(() -> adminRepository.findByEmailIgnoreCase(identity.email))
+                .orElseThrow(() -> new InvalidCredentialsException(
+                        "No admin account is registered for this Google account. Ask your System Admin to add it first."));
+
+        if (admin.getGoogleId() == null) {
+            admin.setGoogleId(identity.googleId);
+            if (admin.getAuthProvider() == null) admin.setAuthProvider(AuthProvider.LOCAL);
+            adminRepository.save(admin);
+            log.info("Linked Google identity to existing admin id={}", admin.getId());
+        }
+
+        log.info("Google Sign-In completed for admin id={}", admin.getId());
+        return issueLoginResponse(admin);
+    }
+
+    // ── Mobile OTP login ─────────────────────────────────────────────────
+    @Transactional(readOnly = true)
+    public OtpRequestResponse requestMobileOtp(String mobile) {
+        Admin admin = adminRepository.findByMobile(mobile.trim())
+                .orElseThrow(() -> new InvalidCredentialsException("No admin account is registered with this mobile number."));
+
+        String key = MOBILE_LOGIN_NAMESPACE + admin.getMobile();
+        String otp = otpService.generate(key);
+        smsService.sendOtp(admin.getMobile(), otp, otpService.expiryMinutes());
+        log.info("Mobile login OTP sent for admin id={}", admin.getId());
+        return new OtpRequestResponse(
+                "A verification code has been sent to your registered mobile number.",
+                otpService.expiryMinutes() * 60,
+                otpService.secondsUntilResendAllowed(key));
+    }
+
+    @Transactional
+    public LoginResponse verifyMobileOtp(String mobile, String otp) {
+        Admin admin = adminRepository.findByMobile(mobile.trim())
+                .orElseThrow(() -> new InvalidCredentialsException("No admin account is registered with this mobile number."));
+
+        otpService.verify(MOBILE_LOGIN_NAMESPACE + admin.getMobile(), otp);
+        log.info("Mobile OTP login completed for admin id={}", admin.getId());
+        return issueLoginResponse(admin);
+    }
+
+    // ── GET /api/auth/me ──────────────────────────────────────────────────
+    @Transactional(readOnly = true)
+    public MeResponse buildMeResponse(String username) {
+        Admin admin = adminRepository.findByUsername(username)
+                .orElseThrow(() -> new ResourceNotFoundException("Admin account not found."));
+
+        MeResponse me = new MeResponse();
+        me.setRole("ADMIN");
+        Role role = admin.getRoleRef();
+        if (role != null) {
+            me.setRoleName(role.getName());
+            me.setRoleLabel(role.getLabel());
+        }
+        me.setName(admin.getName() != null ? admin.getName() : admin.getUsername());
+        me.setEmail(admin.getEmail());
+        me.setMobile(admin.getMobile());
+        me.setDepartment(admin.getDepartment());
+        me.setDesignation(admin.getDesignation());
+        me.setBranch(admin.getBranch());
+        me.setProfilePhotoUrl(admin.getProfilePhotoUrl());
+        me.setMustChangePassword(false);
+        me.setPermissions(permissionCodes(role));
+        return me;
     }
 
     private static String maskEmail(String email) {

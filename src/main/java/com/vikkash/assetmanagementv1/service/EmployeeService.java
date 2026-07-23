@@ -7,17 +7,24 @@ import com.vikkash.assetmanagementv1.dto.EmployeeSeparationDetailDTO;
 import com.vikkash.assetmanagementv1.dto.EmployeeUpdateRequest;
 import com.vikkash.assetmanagementv1.dto.InitiateSeparationRequest;
 import com.vikkash.assetmanagementv1.dto.LoginResponse;
+import com.vikkash.assetmanagementv1.dto.MeResponse;
+import com.vikkash.assetmanagementv1.dto.OtpRequestResponse;
 import com.vikkash.assetmanagementv1.dto.SeparationRemarksRequest;
 import com.vikkash.assetmanagementv1.entity.Asset;
+import com.vikkash.assetmanagementv1.entity.AuthProvider;
 import com.vikkash.assetmanagementv1.entity.Employee;
 import com.vikkash.assetmanagementv1.entity.EmploymentStatus;
+import com.vikkash.assetmanagementv1.entity.Permission;
+import com.vikkash.assetmanagementv1.entity.Role;
 import com.vikkash.assetmanagementv1.exception.DuplicateResourceException;
 import com.vikkash.assetmanagementv1.exception.InvalidCredentialsException;
 import com.vikkash.assetmanagementv1.exception.PendingAssetReturnException;
 import com.vikkash.assetmanagementv1.exception.ResourceNotFoundException;
 import com.vikkash.assetmanagementv1.repository.AssetRepository;
 import com.vikkash.assetmanagementv1.repository.EmployeeRepository;
+import com.vikkash.assetmanagementv1.security.GoogleTokenVerifier;
 import com.vikkash.assetmanagementv1.security.JwtUtil;
+import com.vikkash.assetmanagementv1.security.OtpService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -44,19 +51,31 @@ public class EmployeeService {
     private final JwtUtil            jwtUtil;
     private final AuditLogService    auditLogService;
     private final SeparationNotificationService separationNotificationService;
+    private final GoogleTokenVerifier googleTokenVerifier;
+    private final OtpService         otpService;
+    private final SmsService         smsService;
+
+    /** Separate namespace for the "Login with Mobile" OTP flow. */
+    private static final String MOBILE_LOGIN_NAMESPACE = "empmobilelogin:";
 
     public EmployeeService(EmployeeRepository employeeRepository,
                            AssetRepository assetRepository,
                            PasswordEncoder passwordEncoder,
                            JwtUtil jwtUtil,
                            AuditLogService auditLogService,
-                           SeparationNotificationService separationNotificationService) {
+                           SeparationNotificationService separationNotificationService,
+                           GoogleTokenVerifier googleTokenVerifier,
+                           OtpService otpService,
+                           SmsService smsService) {
         this.employeeRepository = employeeRepository;
         this.assetRepository    = assetRepository;
         this.passwordEncoder    = passwordEncoder;
         this.jwtUtil            = jwtUtil;
         this.auditLogService    = auditLogService;
         this.separationNotificationService = separationNotificationService;
+        this.googleTokenVerifier = googleTokenVerifier;
+        this.otpService         = otpService;
+        this.smsService         = smsService;
     }
 
     // ── Authentication ─────────────────────────────────────────────────────
@@ -84,9 +103,93 @@ public class EmployeeService {
             throw new InvalidCredentialsException("Invalid Employee ID or password");
         }
 
-        String token = jwtUtil.generateToken(employee.getEmployeeId(), "EMPLOYEE");
+        return issueLoginResponse(employee);
+    }
 
+    private LoginResponse issueLoginResponse(Employee employee) {
+        String token = jwtUtil.generateToken(employee.getEmployeeId(), "EMPLOYEE", permissionCodes(employee.getRoleRef()));
         return LoginResponse.forEmployee(token, employee);
+    }
+
+    private List<String> permissionCodes(Role role) {
+        if (role == null) return List.of();
+        return role.getPermissions().stream().map(Permission::getCode).toList();
+    }
+
+    // ── Google Sign-In ───────────────────────────────────────────────────
+    // Same "must already exist, never auto-provision" policy as AdminService
+    // — an employee record is created by HR/Admin, not by whoever happens to
+    // sign in with a matching Google account.
+    @Transactional
+    public LoginResponse loginWithGoogle(String idToken) {
+        GoogleTokenVerifier.VerifiedGoogleIdentity identity = googleTokenVerifier.verify(idToken);
+
+        Employee employee = employeeRepository.findByGoogleId(identity.googleId)
+                .or(() -> employeeRepository.findByEmail(identity.email))
+                .orElseThrow(() -> new InvalidCredentialsException(
+                        "No employee account is registered for this Google account. Contact IT/HR to have it added."));
+
+        if (employee.getGoogleId() == null) {
+            employee.setGoogleId(identity.googleId);
+            if (employee.getAuthProvider() == null) employee.setAuthProvider(AuthProvider.LOCAL);
+            employeeRepository.save(employee);
+            log.info("Linked Google identity to existing employee id={}", employee.getEmployeeId());
+        }
+
+        log.info("Google Sign-In completed for employee id={}", employee.getEmployeeId());
+        return issueLoginResponse(employee);
+    }
+
+    // ── Mobile OTP login ─────────────────────────────────────────────────
+    @Transactional(readOnly = true)
+    public OtpRequestResponse requestMobileOtp(String mobile) {
+        Employee employee = employeeRepository.findByMobile(mobile.trim())
+                .orElseThrow(() -> new InvalidCredentialsException("No employee account is registered with this mobile number."));
+
+        String key = MOBILE_LOGIN_NAMESPACE + employee.getMobile();
+        String otp = otpService.generate(key);
+        smsService.sendOtp(employee.getMobile(), otp, otpService.expiryMinutes());
+        log.info("Mobile login OTP sent for employee id={}", employee.getEmployeeId());
+        return new OtpRequestResponse(
+                "A verification code has been sent to your registered mobile number.",
+                otpService.expiryMinutes() * 60,
+                otpService.secondsUntilResendAllowed(key));
+    }
+
+    @Transactional
+    public LoginResponse verifyMobileOtp(String mobile, String otp) {
+        Employee employee = employeeRepository.findByMobile(mobile.trim())
+                .orElseThrow(() -> new InvalidCredentialsException("No employee account is registered with this mobile number."));
+
+        otpService.verify(MOBILE_LOGIN_NAMESPACE + employee.getMobile(), otp);
+        log.info("Mobile OTP login completed for employee id={}", employee.getEmployeeId());
+        return issueLoginResponse(employee);
+    }
+
+    // ── GET /api/auth/me ──────────────────────────────────────────────────
+    @Transactional(readOnly = true)
+    public MeResponse buildMeResponse(String employeeId) {
+        Employee employee = employeeRepository.findByEmployeeId(employeeId)
+                .orElseThrow(() -> new ResourceNotFoundException("Employee not found."));
+
+        MeResponse me = new MeResponse();
+        me.setRole("EMPLOYEE");
+        Role role = employee.getRoleRef();
+        if (role != null) {
+            me.setRoleName(role.getName());
+            me.setRoleLabel(role.getLabel());
+        }
+        me.setName(employee.getEmployeeName());
+        me.setEmail(employee.getEmail());
+        me.setMobile(employee.getMobile());
+        me.setEmployeeId(employee.getEmployeeId());
+        me.setDepartment(employee.getDepartment());
+        me.setDesignation(employee.getDesignation());
+        me.setBranch(employee.getLocation());
+        me.setProfilePhotoUrl(employee.getProfilePhotoUrl());
+        me.setMustChangePassword(employee.isMustChangePassword());
+        me.setPermissions(permissionCodes(role));
+        return me;
     }
 
     @Transactional

@@ -8,12 +8,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.lang.NonNull;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -60,15 +62,23 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 String subject = jwtUtil.extractSubject(token);
                 String role    = jwtUtil.extractRole(token);
 
+                // Coarse role (unchanged — every existing hasRole("ADMIN")/
+                // hasRole("EMPLOYEE") check in SecurityConfig keeps working
+                // exactly as before) PLUS one raw authority per fine-grained
+                // permission code, so newer @PreAuthorize("hasAuthority('X')")
+                // checks can layer on top without touching the coarse gates.
+                List<GrantedAuthority> authorities = new ArrayList<>();
+                authorities.add(new SimpleGrantedAuthority("ROLE_" + role));
+                for (String perm : jwtUtil.extractPermissions(token)) {
+                    authorities.add(new SimpleGrantedAuthority(perm));
+                }
+
                 UsernamePasswordAuthenticationToken authentication =
-                        new UsernamePasswordAuthenticationToken(
-                                subject,
-                                null,
-                                List.of(new SimpleGrantedAuthority("ROLE_" + role))
-                        );
+                        new UsernamePasswordAuthenticationToken(subject, null, authorities);
 
                 SecurityContextHolder.getContext().setAuthentication(authentication);
-                log.debug("JWT authenticated: subject={} role={} uri={}", subject, role, request.getRequestURI());
+                log.debug("JWT authenticated: subject={} role={} permCount={} uri={}",
+                        subject, role, authorities.size() - 1, request.getRequestURI());
 
             } else {
                 log.debug("JWT validation failed for URI: {}", request.getRequestURI());

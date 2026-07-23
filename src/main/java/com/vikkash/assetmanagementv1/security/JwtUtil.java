@@ -31,8 +31,24 @@ public class JwtUtil {
     }
 
     public String generateToken(String subject, String role) {
+        return generateToken(subject, role, java.util.Set.of());
+    }
+
+    /**
+     * Same as {@link #generateToken(String, String)} but additionally embeds
+     * the caller's fine-grained permission codes (from their assigned
+     * {@link com.vikkash.assetmanagementv1.entity.Role}) as a "perms" claim —
+     * a comma-joined string, since JJWT's default serializer doesn't need a
+     * JSON array module for that. {@link JwtAuthenticationFilter} turns each
+     * code into its own {@code SimpleGrantedAuthority} so
+     * {@code @PreAuthorize("hasAuthority('ASSETS_WRITE')")} works, and
+     * {@code GET /api/auth/me} returns the same list so the frontend can
+     * decide which modules to render.
+     */
+    public String generateToken(String subject, String role, java.util.Collection<String> permissionCodes) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("role", role);
+        claims.put("perms", String.join(",", permissionCodes));
 
         Date now = new Date();
         Date expiry = new Date(now.getTime() + expirationMs);
@@ -60,6 +76,16 @@ public class JwtUtil {
 
     public String extractRole(String token) {
         return extractAllClaims(token).get("role", String.class);
+    }
+
+    /** Returns the caller's fine-grained permission codes embedded at login (may be empty). */
+    public java.util.List<String> extractPermissions(String token) {
+        String raw = extractAllClaims(token).get("perms", String.class);
+        if (raw == null || raw.isBlank()) return java.util.List.of();
+        return java.util.Arrays.stream(raw.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
     }
 
     public boolean isTokenValid(String token) {

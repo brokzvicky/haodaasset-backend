@@ -12,4 +12,10 @@ public interface AdminRepository extends JpaRepository<Admin, Long> {
     boolean existsByUsername(String username);
     Optional<Admin> findByEmailIgnoreCase(String email);
     boolean existsByEmailIgnoreCase(String email);
+
+    /** Used by the "Login with Mobile" flow. */
+    Optional<Admin> findByMobile(String mobile);
+
+    /** Used by Google Sign-In to find an account already linked to this Google identity. */
+    Optional<Admin> findByGoogleId(String googleId);
 }

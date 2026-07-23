@@ -86,6 +86,36 @@ import jakarta.persistence.*;
     @Column(name = "resigned_date")
     private String resignedDate;
 
+    // ── Profile additions (role-based login / "load my full profile") ──────
+    // All nullable so existing rows keep working unchanged until the
+    // employee/HR fills these in.
+
+    @Column(unique = true, length = 20)
+    private String mobile;
+
+    /** S3 object URL/key for the profile photo, or null if none uploaded. */
+    @Column(name = "profile_photo_url", length = 500)
+    private String profilePhotoUrl;
+
+    // ── Fine-grained authorization ──────────────────────────────────────────
+    // Deliberately separate from the existing coarse `role` String field
+    // above (which stays "ADMIN"/"EMPLOYEE" exactly as-is — AssetService and
+    // EmployeeService already branch on it and must not be disturbed). This
+    // is the finer layer on top: which specific modules/actions this
+    // particular employee is authorized for beyond standard self-service.
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "role_id")
+    private Role roleRef;
+
+    // ── Multi-channel login ─────────────────────────────────────────────────
+    @Enumerated(EnumType.STRING)
+    @Column(name = "auth_provider", nullable = false, length = 20)
+    private AuthProvider authProvider = AuthProvider.LOCAL;
+
+    /** Google account's stable "sub" claim, set only for Google-linked accounts. */
+    @Column(name = "google_id", unique = true, length = 100)
+    private String googleId;
+
     public Employee() {
     }
 
@@ -248,4 +278,19 @@ import jakarta.persistence.*;
     public void setResignedDate(String resignedDate) {
         this.resignedDate = resignedDate;
     }
+
+    public String getMobile() { return mobile; }
+    public void setMobile(String mobile) { this.mobile = mobile; }
+
+    public String getProfilePhotoUrl() { return profilePhotoUrl; }
+    public void setProfilePhotoUrl(String profilePhotoUrl) { this.profilePhotoUrl = profilePhotoUrl; }
+
+    public Role getRoleRef() { return roleRef; }
+    public void setRoleRef(Role roleRef) { this.roleRef = roleRef; }
+
+    public AuthProvider getAuthProvider() { return authProvider; }
+    public void setAuthProvider(AuthProvider authProvider) { this.authProvider = authProvider; }
+
+    public String getGoogleId() { return googleId; }
+    public void setGoogleId(String googleId) { this.googleId = googleId; }
 }

@@ -14,6 +14,15 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long> {
     boolean existsByEmployeeId(String employeeId);
     boolean existsByEmail(String email);
 
+    /** Used by Google Sign-In: find the account this Google identity is linked to. */
+    Optional<Employee> findByEmail(String email);
+
+    /** Used by the "Login with Mobile" flow. */
+    Optional<Employee> findByMobile(String mobile);
+
+    /** Used by Google Sign-In to find an account already linked to this Google identity. */
+    Optional<Employee> findByGoogleId(String googleId);
+
     /**
      * Used by the "Send Asset Email" search box: matches on Employee ID,
      * Employee Name, or Email (case-insensitive, partial match).

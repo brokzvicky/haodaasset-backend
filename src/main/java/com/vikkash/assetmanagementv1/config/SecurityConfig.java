@@ -39,6 +39,14 @@ public class SecurityConfig {
             .csrf(AbstractHttpConfigurer::disable)
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                // ── Exception carved out of the wildcard below: GET /api/auth/me
+                //    returns the caller's own profile + permissions and must be
+                //    authenticated, unlike every other endpoint under /api/auth/**
+                //    (login, OTP, password reset) which are necessarily public.
+                //    Order matters here — Spring Security uses first-match-wins,
+                //    so this narrower rule must come before the wildcard permitAll. ──
+                .requestMatchers("/api/auth/me").authenticated()
+
                 // ── Public: login and password change (used during forced first-login) ──
                 .requestMatchers("/api/auth/**").permitAll()
 
