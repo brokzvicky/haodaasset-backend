@@ -46,9 +46,33 @@ public class EmailService {
     @Value("${app.brevo.api-key}")
     private String brevoApiKey;
 
+    /**
+     * Address CC'd on every outbound email, regardless of which method sends
+     * it. Configurable via app.mail.cc, defaulting to IT Support so the
+     * behavior is preserved even if the property is omitted from a given
+     * environment's properties file.
+     */
+    @Value("${app.mail.cc:itsupport@haodapayments.com}")
+    private String ccAddress;
+
     public EmailService(RestTemplate restTemplate, ObjectMapper objectMapper) {
         this.restTemplate = restTemplate;
         this.objectMapper = objectMapper;
+    }
+
+    /**
+     * Appends the global CC recipient to the outgoing Brevo payload. Called
+     * by every send* method below so all application emails are CC'd
+     * consistently without touching the "to" recipient(s) or any other
+     * email behavior.
+     */
+    private void addGlobalCc(ObjectNode root) {
+        if (ccAddress == null || ccAddress.isBlank()) {
+            return;
+        }
+        ObjectNode cc = objectMapper.createObjectNode();
+        cc.put("email", ccAddress);
+        root.putArray("cc").add(cc);
     }
 
     /**
@@ -70,6 +94,7 @@ public class EmailService {
             ObjectNode recipient = objectMapper.createObjectNode();
             recipient.put("email", to);
             root.putArray("to").add(recipient);
+            addGlobalCc(root);
 
             root.put("subject", heading + " — Your AssetTower verification code");
             root.put("htmlContent", buildHtml(heading, otp, expiryMinutes));
@@ -128,6 +153,7 @@ public class EmailService {
             recipient.put("email", to);
             recipient.put("name", employeeName);
             root.putArray("to").add(recipient);
+            addGlobalCc(root);
 
             root.put("subject", "Asset Assigned To You — " + assetDetails.assetName());
             root.put("htmlContent", buildAssetAssignmentHtml(employeeName, employeeId, assetDetails));
@@ -203,6 +229,7 @@ public class EmailService {
             ObjectNode recipient = objectMapper.createObjectNode();
             recipient.put("email", to);
             root.putArray("to").add(recipient);
+            addGlobalCc(root);
 
             root.put("subject", "Asset Assignment Confirmation — " + details.assetName()
                     + " → " + details.employeeName());
@@ -375,6 +402,7 @@ public class EmailService {
             ObjectNode recipient = objectMapper.createObjectNode();
             recipient.put("email", to);
             root.putArray("to").add(recipient);
+            addGlobalCc(root);
 
             root.put("subject", "Temporary Assignment Expired — " + details.assetName());
             root.put("htmlContent", buildTemporaryAssignmentExpiredHtml(details));
@@ -523,6 +551,7 @@ public class EmailService {
             recipient.put("email", to);
             recipient.put("name", employeeName);
             root.putArray("to").add(recipient);
+            addGlobalCc(root);
 
             root.put("subject", "Asset Return Confirmation");
             root.put("htmlContent", buildAssetReturnHtml(employeeName, employeeId, assetDetails));
@@ -690,6 +719,7 @@ public class EmailService {
             recipient.put("email", to);
             recipient.put("name", employee.employeeName());
             root.putArray("to").add(recipient);
+            addGlobalCc(root);
 
             String subject = assets.size() == 1
                     ? "Your Assigned IT Asset — " + nullSafe(assets.get(0).assetName())
@@ -951,6 +981,7 @@ public class EmailService {
             recipient.put("email", to);
             recipient.put("name", employeeName);
             root.putArray("to").add(recipient);
+            addGlobalCc(root);
 
             root.put("subject", subject);
             root.put("htmlContent", buildFileSharedHtml(employeeName, introMessage, details));
@@ -1139,6 +1170,7 @@ public class EmailService {
             ObjectNode recipient = objectMapper.createObjectNode();
             recipient.put("email", to);
             root.putArray("to").add(recipient);
+            addGlobalCc(root);
 
             root.put("subject", subject);
             root.put("htmlContent", buildSimpleHtml(heading, bodyHtml));
