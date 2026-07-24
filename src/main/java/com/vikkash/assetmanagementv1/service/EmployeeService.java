@@ -9,6 +9,7 @@ import com.vikkash.assetmanagementv1.dto.InitiateSeparationRequest;
 import com.vikkash.assetmanagementv1.dto.LoginResponse;
 import com.vikkash.assetmanagementv1.dto.MeResponse;
 import com.vikkash.assetmanagementv1.dto.OtpRequestResponse;
+import com.vikkash.assetmanagementv1.dto.ResignedEmployeeViewDTO;
 import com.vikkash.assetmanagementv1.dto.SeparationRemarksRequest;
 import com.vikkash.assetmanagementv1.entity.Asset;
 import com.vikkash.assetmanagementv1.entity.AuthProvider;
@@ -103,7 +104,17 @@ public class EmployeeService {
             throw new InvalidCredentialsException("Invalid Employee ID or password");
         }
 
+        assertLoginAllowed(employee);
         return issueLoginResponse(employee);
+    }
+
+    /** Blocks login for any employee whose access has been disabled (Resigned / Terminated). */
+    private void assertLoginAllowed(Employee employee) {
+        if (!employee.isLoginEnabled()) {
+            log.warn("Login blocked for {} — account disabled (status: {})", employee.getEmployeeId(), employee.getEmploymentStatus());
+            throw new InvalidCredentialsException(
+                    "This account has been disabled. Please contact HR/IT if you believe this is a mistake.");
+        }
     }
 
     private LoginResponse issueLoginResponse(Employee employee) {
@@ -136,6 +147,7 @@ public class EmployeeService {
             log.info("Linked Google identity to existing employee id={}", employee.getEmployeeId());
         }
 
+        assertLoginAllowed(employee);
         log.info("Google Sign-In completed for employee id={}", employee.getEmployeeId());
         return issueLoginResponse(employee);
     }
@@ -162,6 +174,7 @@ public class EmployeeService {
                 .orElseThrow(() -> new InvalidCredentialsException("No employee account is registered with this mobile number."));
 
         otpService.verify(MOBILE_LOGIN_NAMESPACE + employee.getMobile(), otp);
+        assertLoginAllowed(employee);
         log.info("Mobile OTP login completed for employee id={}", employee.getEmployeeId());
         return issueLoginResponse(employee);
     }
@@ -236,9 +249,12 @@ public class EmployeeService {
         employee.setDesignation(request.getDesignation());
         employee.setLocation(request.getLocation());
         employee.setJoiningDate(request.getJoiningDate());
+        employee.setManager(request.getManager());
         employee.setRole("EMPLOYEE");
         employee.setPassword(passwordEncoder.encode(DEFAULT_PASSWORD));
         employee.setMustChangePassword(true);  // force change on first login
+        employee.setEmploymentStatus(EmploymentStatus.ACTIVE);
+        employee.setLoginEnabled(true);
 
         log.info("Created employee: {}", empId);
         Employee saved = employeeRepository.save(employee);
@@ -285,6 +301,7 @@ public class EmployeeService {
         employee.setDesignation(request.getDesignation());
         employee.setLocation(request.getLocation());
         employee.setJoiningDate(request.getJoiningDate());
+        employee.setManager(request.getManager());
 
         Employee saved = employeeRepository.save(employee);
 
@@ -406,11 +423,13 @@ public class EmployeeService {
     public EmployeeSeparationDetailDTO initiateSeparation(String employeeId, InitiateSeparationRequest request) {
         Employee employee = getByEmployeeId(employeeId);
 
-        if (EmploymentStatus.RESIGNED.equals(employee.getEmploymentStatus())) {
+        if (EmploymentStatus.RESIGNED.equals(employee.getEmploymentStatus())
+                || EmploymentStatus.TERMINATED.equals(employee.getEmploymentStatus())) {
             throw new IllegalArgumentException(
-                    "This employee is already Resigned. Reactivate them first if you need to restart separation.");
+                    "This employee has already left the organization. Reactivate them first if you need to restart separation.");
         }
-        if (!EmploymentStatus.ACTIVE.equals(employee.getEmploymentStatus())) {
+        if (!EmploymentStatus.ACTIVE.equals(employee.getEmploymentStatus())
+                && !EmploymentStatus.ON_LEAVE.equals(employee.getEmploymentStatus())) {
             throw new IllegalArgumentException(
                     "A separation is already in progress for this employee (status: " + employee.getEmploymentStatus() + ").");
         }
@@ -424,6 +443,8 @@ public class EmployeeService {
         employee.setExitClearanceStatus(EmploymentStatus.CLEARANCE_PENDING);
         employee.setClearanceCompletionDate(null);
         employee.setResignedDate(null);
+        employee.setUpdatedBy(currentAdminUsername());
+        employee.setUpdatedDate(java.time.LocalDateTime.now().toString());
 
         Employee saved = employeeRepository.save(employee);
         auditLogService.record("EMPLOYEE", saved.getEmployeeId(), "SEPARATION_INITIATED",
@@ -496,14 +517,28 @@ public class EmployeeService {
 
         employee.setEmploymentStatus(EmploymentStatus.RESIGNED);
         employee.setResignedDate(today);
+        employee.setLoginEnabled(false);
+        employee.setUpdatedBy(currentAdminUsername());
+        employee.setUpdatedDate(java.time.LocalDateTime.now().toString());
         Employee saved = employeeRepository.save(employee);
 
         auditLogService.record("EMPLOYEE", saved.getEmployeeId(), "SEPARATION_COMPLETED",
                 "Resignation finalized for " + saved.getEmployeeName() + " as of " + today
-                        + " — all assets confirmed returned.");
+                        + " — all assets confirmed returned. Login access disabled.");
         separationNotificationService.notifyResignationFinalized(saved);
 
         return getSeparationDetail(saved.getEmployeeId());
+    }
+
+    /** Best-effort admin username for audit fields on lifecycle transitions triggered without an explicit caller. */
+    private String currentAdminUsername() {
+        try {
+            org.springframework.security.core.Authentication auth =
+                    org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            return auth != null ? auth.getName() : null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /** Cancels an in-progress separation and restores the employee to Active (e.g. resignation withdrawn). */
@@ -514,9 +549,10 @@ public class EmployeeService {
         if (EmploymentStatus.ACTIVE.equals(employee.getEmploymentStatus())) {
             throw new IllegalArgumentException("This employee is already Active — there is no separation to cancel.");
         }
-        if (EmploymentStatus.RESIGNED.equals(employee.getEmploymentStatus())) {
+        if (EmploymentStatus.RESIGNED.equals(employee.getEmploymentStatus())
+                || EmploymentStatus.TERMINATED.equals(employee.getEmploymentStatus())) {
             throw new IllegalArgumentException(
-                    "This employee is already Resigned. Use Reactivate instead if they are rejoining.");
+                    "This employee has already left the organization. Use Reactivate instead if they are rejoining.");
         }
 
         employee.setEmploymentStatus(EmploymentStatus.ACTIVE);
@@ -555,5 +591,163 @@ public class EmployeeService {
     @Transactional(readOnly = true)
     public List<Employee> getAllInSeparation() {
         return employeeRepository.findAllInSeparation();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //  ON LEAVE
+    // ═════════════════════════════════════════════════════════════════════
+
+    @Transactional
+    public Employee markOnLeave(String employeeId, com.vikkash.assetmanagementv1.dto.LeaveRequest request, String adminUsername) {
+        Employee employee = getByEmployeeId(employeeId);
+        if (!EmploymentStatus.ACTIVE.equals(employee.getEmploymentStatus())) {
+            throw new IllegalArgumentException(
+                    "Only Active employees can be placed On Leave (current status: " + employee.getEmploymentStatus() + ").");
+        }
+        employee.setEmploymentStatus(EmploymentStatus.ON_LEAVE);
+        employee.setLeaveReason(request.getReason());
+        employee.setLeaveStartDate(request.getStartDate() != null ? request.getStartDate() : LocalDate.now().toString());
+        employee.setLeaveEndDate(request.getEndDate());
+        if (request.getRemarks() != null && !request.getRemarks().isBlank()) {
+            employee.setSeparationRemarks(request.getRemarks());
+        }
+        employee.setUpdatedBy(adminUsername);
+        employee.setUpdatedDate(java.time.LocalDateTime.now().toString());
+        Employee saved = employeeRepository.save(employee);
+        auditLogService.record("EMPLOYEE", saved.getEmployeeId(), "MARKED_ON_LEAVE",
+                saved.getEmployeeName() + " placed On Leave — reason: " + request.getReason());
+        return saved;
+    }
+
+    @Transactional
+    public Employee endLeave(String employeeId, String adminUsername) {
+        Employee employee = getByEmployeeId(employeeId);
+        if (!EmploymentStatus.ON_LEAVE.equals(employee.getEmploymentStatus())) {
+            throw new IllegalArgumentException("This employee is not currently On Leave.");
+        }
+        employee.setEmploymentStatus(EmploymentStatus.ACTIVE);
+        employee.setUpdatedBy(adminUsername);
+        employee.setUpdatedDate(java.time.LocalDateTime.now().toString());
+        Employee saved = employeeRepository.save(employee);
+        auditLogService.record("EMPLOYEE", saved.getEmployeeId(), "LEAVE_ENDED",
+                saved.getEmployeeName() + " returned from leave — restored to Active");
+        return saved;
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //  TERMINATION (involuntary exit)
+    // ═════════════════════════════════════════════════════════════════════
+
+    /**
+     * Marks an employee Terminated. Never deletes the record. Blocked with a
+     * {@link PendingAssetReturnException} if assets are still assigned — same
+     * guard as resignation, so IT reclaims equipment before offboarding is final.
+     */
+    @Transactional
+    public Employee terminateEmployee(String employeeId, com.vikkash.assetmanagementv1.dto.TerminateEmployeeRequest request, String adminUsername) {
+        Employee employee = getByEmployeeId(employeeId);
+        if (EmploymentStatus.RESIGNED.equals(employee.getEmploymentStatus())
+                || EmploymentStatus.TERMINATED.equals(employee.getEmploymentStatus())) {
+            throw new IllegalArgumentException("This employee has already left the organization.");
+        }
+
+        List<Asset> stillAssigned = assetRepository.findByEmployeeId(employee.getEmployeeId()).stream()
+                .filter(a -> "Assigned".equals(a.getAssetStatus()))
+                .collect(Collectors.toList());
+        if (!stillAssigned.isEmpty()) {
+            throw new PendingAssetReturnException(stillAssigned);
+        }
+
+        employee.setEmploymentStatus(EmploymentStatus.TERMINATED);
+        employee.setTerminationDate(request.getTerminationDate());
+        employee.setLastWorkingDate(request.getTerminationDate());
+        employee.setResignationReason(request.getExitReason());
+        employee.setSeparationRemarks(request.getExitRemarks());
+        employee.setExitClearanceStatus(EmploymentStatus.CLEARANCE_COMPLETED);
+        employee.setClearanceCompletionDate(LocalDate.now().toString());
+        employee.setLoginEnabled(false);
+        employee.setUpdatedBy(adminUsername);
+        employee.setUpdatedDate(java.time.LocalDateTime.now().toString());
+
+        Employee saved = employeeRepository.save(employee);
+        auditLogService.record("EMPLOYEE", saved.getEmployeeId(), "TERMINATED",
+                saved.getEmployeeName() + " terminated as of " + request.getTerminationDate()
+                        + " — reason: " + request.getExitReason() + ". Login access disabled.");
+        return saved;
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //  REACTIVATE (Resigned / Terminated -> Active — rejoining)
+    // ═════════════════════════════════════════════════════════════════════
+
+    /** Restores a Resigned/Terminated employee to Active and re-enables login. Historical separation fields are preserved, not wiped. */
+    @Transactional
+    public Employee reactivateEmployee(String employeeId, String adminUsername) {
+        Employee employee = getByEmployeeId(employeeId);
+        if (!EmploymentStatus.RESIGNED.equals(employee.getEmploymentStatus())
+                && !EmploymentStatus.TERMINATED.equals(employee.getEmploymentStatus())) {
+            throw new IllegalArgumentException("Only Resigned or Terminated employees can be reactivated.");
+        }
+        String previousStatus = employee.getEmploymentStatus();
+        employee.setEmploymentStatus(EmploymentStatus.ACTIVE);
+        employee.setLoginEnabled(true);
+        employee.setUpdatedBy(adminUsername);
+        employee.setUpdatedDate(java.time.LocalDateTime.now().toString());
+        Employee saved = employeeRepository.save(employee);
+        auditLogService.record("EMPLOYEE", saved.getEmployeeId(), "REACTIVATED",
+                saved.getEmployeeName() + " reactivated from " + previousStatus + " to Active. Login access restored.");
+        return saved;
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //  STATUS FILTERS / DASHBOARD / RESIGNED VIEW
+    // ═════════════════════════════════════════════════════════════════════
+
+    /**
+     * Employees Module filter tabs: Active / Notice Period / Resigned /
+     * Terminated / All. "Notice Period" also includes the legacy Exit
+     * Clearance / Assets Returned sub-stages so nothing falls through the
+     * cracks for employees mid-separation.
+     */
+    @Transactional(readOnly = true)
+    public List<Employee> getByStatusFilter(String filter) {
+        if (filter == null || filter.isBlank() || "All".equalsIgnoreCase(filter)) {
+            return employeeRepository.findAll();
+        }
+        if (EmploymentStatus.NOTICE_PERIOD.equalsIgnoreCase(filter)) {
+            return employeeRepository.findByEmploymentStatusIn(EmploymentStatus.NOTICE_PERIOD_BUCKET);
+        }
+        for (String status : EmploymentStatus.ALL_STATUSES) {
+            if (status.equalsIgnoreCase(filter)) {
+                return employeeRepository.findByEmploymentStatus(status);
+            }
+        }
+        throw new IllegalArgumentException("Unknown status filter: " + filter);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ResignedEmployeeViewDTO> getResignedEmployeesView() {
+        return employeeRepository.findAllResigned().stream()
+                .map(ResignedEmployeeViewDTO::from)
+                .collect(Collectors.toList());
+    }
+
+    /** Dashboard cards: Active / On Leave / Notice Period / Resigned / Terminated / Pending Returns / Joined & Left This Month. */
+    @Transactional(readOnly = true)
+    public Map<String, Long> getLifecycleDashboardStats() {
+        YearMonth thisMonth = YearMonth.now();
+        String monthStart = thisMonth.atDay(1).toString();
+        String monthEnd = thisMonth.atEndOfMonth().toString();
+
+        Map<String, Long> stats = new java.util.HashMap<>();
+        stats.put("active", employeeRepository.countByEmploymentStatus(EmploymentStatus.ACTIVE));
+        stats.put("onLeave", employeeRepository.countByEmploymentStatus(EmploymentStatus.ON_LEAVE));
+        stats.put("noticePeriod", employeeRepository.countByEmploymentStatusIn(EmploymentStatus.NOTICE_PERIOD_BUCKET));
+        stats.put("resigned", employeeRepository.countByEmploymentStatus(EmploymentStatus.RESIGNED));
+        stats.put("terminated", employeeRepository.countByEmploymentStatus(EmploymentStatus.TERMINATED));
+        stats.put("pendingAssetReturns", assetRepository.countPendingAssetReturnsAcrossSeparatingEmployees());
+        stats.put("joinedThisMonth", employeeRepository.countJoinedBetween(monthStart, monthEnd));
+        stats.put("leftThisMonth", employeeRepository.countLeftBetween(monthStart, monthEnd));
+        return stats;
     }
 }

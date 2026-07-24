@@ -29,12 +29,22 @@ public class EmployeeUpdateRequest {
 
     private String joiningDate;
 
+    private String manager;
+
     public String getJoiningDate() {
         return joiningDate;
     }
 
     public void setJoiningDate(String joiningDate) {
         this.joiningDate = joiningDate;
+    }
+
+    public String getManager() {
+        return manager;
+    }
+
+    public void setManager(String manager) {
+        this.manager = manager;
     }
 
     public String getEmployeeName() {

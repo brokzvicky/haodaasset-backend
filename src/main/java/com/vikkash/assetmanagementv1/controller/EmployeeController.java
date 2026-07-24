@@ -161,4 +161,77 @@ public class EmployeeController {
             @PathVariable String employeeId, @RequestBody(required = false) SeparationRemarksRequest request) {
         return ResponseEntity.ok(employeeService.cancelSeparation(employeeId, request));
     }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //  EMPLOYEE LIFECYCLE MANAGEMENT (status tabs, on leave, termination,
+    //  reactivation, dedicated Resigned view, lifecycle dashboard)
+    // ═════════════════════════════════════════════════════════════════════
+
+    /**
+     * Employees Module status tabs. filter is one of: Active, On Leave,
+     * Notice Period, Resigned, Terminated, All (default Active if omitted).
+     */
+    @GetMapping("/api/admin/employees/by-status")
+    public List<Employee> getEmployeesByStatus(
+            @RequestParam(name = "filter", required = false, defaultValue = "Active") String filter) {
+        return employeeService.getByStatusFilter(filter);
+    }
+
+    /** Dedicated Resigned Employees view: ID, name, department, designation, manager, dates, exit reason, asset return status. */
+    @GetMapping("/api/admin/employees/resigned")
+    public List<com.vikkash.assetmanagementv1.dto.ResignedEmployeeViewDTO> getResignedEmployees() {
+        return employeeService.getResignedEmployeesView();
+    }
+
+    /** Dashboard cards: Active / On Leave / Notice Period / Resigned / Terminated / Pending Returns / Joined & Left This Month. */
+    @GetMapping("/api/admin/employees/dashboard/lifecycle-stats")
+    public Map<String, Long> getLifecycleDashboardStats() {
+        return employeeService.getLifecycleDashboardStats();
+    }
+
+    /** Reference vocabulary for the "On Leave" reason dropdown. */
+    @GetMapping("/api/admin/employees/leave/reasons")
+    public List<String> getLeaveReasons() {
+        return com.vikkash.assetmanagementv1.entity.EmploymentStatus.LEAVE_REASONS;
+    }
+
+    /** Active -> On Leave. */
+    @PostMapping("/api/admin/employees/{employeeId}/leave/start")
+    public ResponseEntity<Employee> markOnLeave(
+            @PathVariable String employeeId,
+            @jakarta.validation.Valid @RequestBody com.vikkash.assetmanagementv1.dto.LeaveRequest request,
+            org.springframework.security.core.Authentication authentication) {
+        String admin = authentication != null ? authentication.getName() : null;
+        return ResponseEntity.ok(employeeService.markOnLeave(employeeId, request, admin));
+    }
+
+    /** On Leave -> Active. */
+    @PostMapping("/api/admin/employees/{employeeId}/leave/end")
+    public ResponseEntity<Employee> endLeave(
+            @PathVariable String employeeId, org.springframework.security.core.Authentication authentication) {
+        String admin = authentication != null ? authentication.getName() : null;
+        return ResponseEntity.ok(employeeService.endLeave(employeeId, admin));
+    }
+
+    /**
+     * Marks an employee Terminated (involuntary exit). Blocked with 409 +
+     * pending asset list if anything is still assigned — same guard as
+     * resignation. Automatically disables login.
+     */
+    @PostMapping("/api/admin/employees/{employeeId}/terminate")
+    public ResponseEntity<Employee> terminateEmployee(
+            @PathVariable String employeeId,
+            @jakarta.validation.Valid @RequestBody com.vikkash.assetmanagementv1.dto.TerminateEmployeeRequest request,
+            org.springframework.security.core.Authentication authentication) {
+        String admin = authentication != null ? authentication.getName() : null;
+        return ResponseEntity.ok(employeeService.terminateEmployee(employeeId, request, admin));
+    }
+
+    /** Resigned/Terminated -> Active. Re-enables login. Preserves all historical separation data. */
+    @PostMapping("/api/admin/employees/{employeeId}/reactivate")
+    public ResponseEntity<Employee> reactivateEmployee(
+            @PathVariable String employeeId, org.springframework.security.core.Authentication authentication) {
+        String admin = authentication != null ? authentication.getName() : null;
+        return ResponseEntity.ok(employeeService.reactivateEmployee(employeeId, admin));
+    }
 }

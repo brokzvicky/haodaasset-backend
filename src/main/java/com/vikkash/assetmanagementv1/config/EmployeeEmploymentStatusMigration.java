@@ -56,6 +56,15 @@ public class EmployeeEmploymentStatusMigration implements ApplicationRunner {
                 employee.setExitClearanceStatus(EmploymentStatus.CLEARANCE_PENDING);
                 changed = true;
             }
+            // Existing rows predate the login_enabled column — Hibernate's default only
+            // applies going forward, so back-fill it here based on current status: anyone
+            // already Resigned/Terminated should NOT be able to log in; everyone else should.
+            boolean shouldHaveLogin = !EmploymentStatus.RESIGNED.equals(employee.getEmploymentStatus())
+                    && !EmploymentStatus.TERMINATED.equals(employee.getEmploymentStatus());
+            if (employee.isLoginEnabled() != shouldHaveLogin) {
+                employee.setLoginEnabled(shouldHaveLogin);
+                changed = true;
+            }
             if (changed) {
                 employeeRepository.save(employee);
                 fixed++;

@@ -41,7 +41,11 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long> {
 
     List<Employee> findByEmploymentStatus(String employmentStatus);
 
+    List<Employee> findByEmploymentStatusIn(List<String> employmentStatuses);
+
     long countByEmploymentStatus(String employmentStatus);
+
+    long countByEmploymentStatusIn(List<String> employmentStatuses);
 
     /** Exit clearance still outstanding: anyone past Active but not yet Resigned. */
     @Query("SELECT COUNT(e) FROM Employee e WHERE e.employmentStatus NOT IN ('Active', 'Resigned')")
@@ -54,4 +58,21 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long> {
     /** Employees currently in any separation stage (used by the Employee Exit Report). */
     @Query("SELECT e FROM Employee e WHERE e.employmentStatus <> 'Active' ORDER BY e.noticeStartDate DESC NULLS LAST")
     List<Employee> findAllInSeparation();
+
+    // ── Lifecycle dashboard (Active / On Leave / Notice Period / Resigned / Terminated) ──────
+
+    @Query("SELECT COUNT(e) FROM Employee e WHERE e.joiningDate >= :monthStart AND e.joiningDate <= :monthEnd")
+    long countJoinedBetween(String monthStart, String monthEnd);
+
+    @Query("SELECT COUNT(e) FROM Employee e WHERE e.employmentStatus IN ('Resigned','Terminated') " +
+           "AND ((e.resignedDate >= :monthStart AND e.resignedDate <= :monthEnd) " +
+           "OR (e.terminationDate >= :monthStart AND e.terminationDate <= :monthEnd))")
+    long countLeftBetween(String monthStart, String monthEnd);
+
+    /** Backs the dedicated Resigned Employees view — newest resignation first. */
+    @Query("SELECT e FROM Employee e WHERE e.employmentStatus = 'Resigned' ORDER BY e.resignedDate DESC NULLS LAST")
+    List<Employee> findAllResigned();
+
+    @Query("SELECT e FROM Employee e WHERE e.employmentStatus = 'Terminated' ORDER BY e.terminationDate DESC NULLS LAST")
+    List<Employee> findAllTerminated();
 }

@@ -31,6 +31,14 @@ public class EmployeeSeparationDetailDTO {
     private String exitClearanceStatus;
     private String clearanceCompletionDate;
     private String resignedDate;
+    private String manager;
+    private boolean loginEnabled;
+    private String terminationDate;
+    private String leaveReason;
+    private String leaveStartDate;
+    private String leaveEndDate;
+    private String updatedBy;
+    private String updatedDate;
 
     private List<Asset> assignedAssets;
     private List<Asset> returnedAssets;
@@ -53,6 +61,14 @@ public class EmployeeSeparationDetailDTO {
         dto.exitClearanceStatus = e.getExitClearanceStatus();
         dto.clearanceCompletionDate = e.getClearanceCompletionDate();
         dto.resignedDate = e.getResignedDate();
+        dto.manager = e.getManager();
+        dto.loginEnabled = e.isLoginEnabled();
+        dto.terminationDate = e.getTerminationDate();
+        dto.leaveReason = e.getLeaveReason();
+        dto.leaveStartDate = e.getLeaveStartDate();
+        dto.leaveEndDate = e.getLeaveEndDate();
+        dto.updatedBy = e.getUpdatedBy();
+        dto.updatedDate = e.getUpdatedDate();
         dto.assignedAssets = assignedAssets;
         dto.returnedAssets = returnedAssets;
         return dto;
@@ -74,6 +90,14 @@ public class EmployeeSeparationDetailDTO {
     public String getExitClearanceStatus() { return exitClearanceStatus; }
     public String getClearanceCompletionDate() { return clearanceCompletionDate; }
     public String getResignedDate() { return resignedDate; }
+    public String getManager() { return manager; }
+    public boolean isLoginEnabled() { return loginEnabled; }
+    public String getTerminationDate() { return terminationDate; }
+    public String getLeaveReason() { return leaveReason; }
+    public String getLeaveStartDate() { return leaveStartDate; }
+    public String getLeaveEndDate() { return leaveEndDate; }
+    public String getUpdatedBy() { return updatedBy; }
+    public String getUpdatedDate() { return updatedDate; }
     public List<Asset> getAssignedAssets() { return assignedAssets; }
     public List<Asset> getReturnedAssets() { return returnedAssets; }
 }

@@ -175,6 +175,16 @@ public class AssetService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Employee not found with ID: " + request.getEmployeeId()));
 
+        // Guard: assets cannot be assigned to an employee who has left the
+        // organization (Resigned / Terminated) — their access is already
+        // disabled, so assigning them equipment would immediately orphan it.
+        if (com.vikkash.assetmanagementv1.entity.EmploymentStatus.RESIGNED.equals(employee.getEmploymentStatus())
+                || com.vikkash.assetmanagementv1.entity.EmploymentStatus.TERMINATED.equals(employee.getEmploymentStatus())) {
+            throw new IllegalArgumentException(
+                    "Cannot assign an asset to " + employee.getEmployeeName() + " — employee status is "
+                            + employee.getEmploymentStatus() + ".");
+        }
+
         // Guard: the employee's own location must be set before we can copy it
         // onto the asset — otherwise we'd silently create an asset with no
         // location, which is exactly the kind of drift this fix is meant to

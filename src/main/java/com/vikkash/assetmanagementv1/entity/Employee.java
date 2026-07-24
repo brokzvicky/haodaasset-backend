@@ -86,6 +86,42 @@ import jakarta.persistence.*;
     @Column(name = "resigned_date")
     private String resignedDate;
 
+    /** Reporting manager's name (free text, matches the rest of this entity's simple-string convention). */
+    @Column(name = "manager")
+    private String manager;
+
+    /**
+     * Whether this employee is currently allowed to log in. Automatically
+     * flipped to false the moment status becomes Resigned or Terminated,
+     * and back to true on Reactivate. Kept as an explicit column (rather
+     * than deriving it from employmentStatus at login time) so it reads
+     * as an unambiguous, auditable flag on its own.
+     */
+    @Column(name = "login_enabled", nullable = false, columnDefinition = "boolean default true")
+    private boolean loginEnabled = true;
+
+    /** Date the employee was marked Terminated (involuntary exit). */
+    @Column(name = "termination_date")
+    private String terminationDate;
+
+    /** Why the employee was placed On Leave. */
+    @Column(name = "leave_reason", length = 100)
+    private String leaveReason;
+
+    @Column(name = "leave_start_date")
+    private String leaveStartDate;
+
+    @Column(name = "leave_end_date")
+    private String leaveEndDate;
+
+    /** Username of the admin who last changed this employee's lifecycle status. */
+    @Column(name = "updated_by", length = 100)
+    private String updatedBy;
+
+    /** Timestamp (ISO-8601) of the last lifecycle status change, for compliance/audit display. */
+    @Column(name = "updated_date")
+    private String updatedDate;
+
     // ── Profile additions (role-based login / "load my full profile") ──────
     // All nullable so existing rows keep working unchanged until the
     // employee/HR fills these in.
@@ -278,6 +314,30 @@ import jakarta.persistence.*;
     public void setResignedDate(String resignedDate) {
         this.resignedDate = resignedDate;
     }
+
+    public String getManager() { return manager; }
+    public void setManager(String manager) { this.manager = manager; }
+
+    public boolean isLoginEnabled() { return loginEnabled; }
+    public void setLoginEnabled(boolean loginEnabled) { this.loginEnabled = loginEnabled; }
+
+    public String getTerminationDate() { return terminationDate; }
+    public void setTerminationDate(String terminationDate) { this.terminationDate = terminationDate; }
+
+    public String getLeaveReason() { return leaveReason; }
+    public void setLeaveReason(String leaveReason) { this.leaveReason = leaveReason; }
+
+    public String getLeaveStartDate() { return leaveStartDate; }
+    public void setLeaveStartDate(String leaveStartDate) { this.leaveStartDate = leaveStartDate; }
+
+    public String getLeaveEndDate() { return leaveEndDate; }
+    public void setLeaveEndDate(String leaveEndDate) { this.leaveEndDate = leaveEndDate; }
+
+    public String getUpdatedBy() { return updatedBy; }
+    public void setUpdatedBy(String updatedBy) { this.updatedBy = updatedBy; }
+
+    public String getUpdatedDate() { return updatedDate; }
+    public void setUpdatedDate(String updatedDate) { this.updatedDate = updatedDate; }
 
     public String getMobile() { return mobile; }
     public void setMobile(String mobile) { this.mobile = mobile; }

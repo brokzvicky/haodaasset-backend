@@ -71,8 +71,12 @@ public class ReportController {
      * (Notice Period → Resigned), with dates, reason, and clearance status.
      */
     @GetMapping("/employee-exit-report/pdf")
-    public ResponseEntity<byte[]> employeeExitReportPdf() throws IOException {
-        byte[] pdf = employeeExitReportService.generatePdf(employeeService.getAllInSeparation());
+    public ResponseEntity<byte[]> employeeExitReportPdf(
+            @org.springframework.web.bind.annotation.RequestParam(name = "status", required = false, defaultValue = "All") String status) throws IOException {
+        java.util.List<com.vikkash.assetmanagementv1.entity.Employee> data = "All".equalsIgnoreCase(status)
+                ? employeeService.getAllInSeparation()
+                : employeeService.getByStatusFilter(status);
+        byte[] pdf = employeeExitReportService.generatePdf(data);
         String filename = "employee-exit-report-" +
                 LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")) + ".pdf";
 
@@ -87,8 +91,12 @@ public class ReportController {
      * Same dataset as the PDF export, as an .xlsx workbook.
      */
     @GetMapping("/employee-exit-report/excel")
-    public ResponseEntity<byte[]> employeeExitReportExcel() throws IOException {
-        byte[] excel = employeeExitReportService.generateExcel(employeeService.getAllInSeparation());
+    public ResponseEntity<byte[]> employeeExitReportExcel(
+            @org.springframework.web.bind.annotation.RequestParam(name = "status", required = false, defaultValue = "All") String status) throws IOException {
+        java.util.List<com.vikkash.assetmanagementv1.entity.Employee> data = "All".equalsIgnoreCase(status)
+                ? employeeService.getAllInSeparation()
+                : employeeService.getByStatusFilter(status);
+        byte[] excel = employeeExitReportService.generateExcel(data);
         String filename = "employee-exit-report-" +
                 LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")) + ".xlsx";
 

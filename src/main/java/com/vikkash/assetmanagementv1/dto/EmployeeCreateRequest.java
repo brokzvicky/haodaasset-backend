@@ -22,7 +22,17 @@ public class EmployeeCreateRequest {
 
     private String joiningDate;
 
+    private String manager;
+
     public EmployeeCreateRequest() {
+    }
+
+    public String getManager() {
+        return manager;
+    }
+
+    public void setManager(String manager) {
+        this.manager = manager;
     }
 
     public String getJoiningDate() {
