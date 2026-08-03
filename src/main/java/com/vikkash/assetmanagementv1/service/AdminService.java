@@ -97,14 +97,13 @@ public class AdminService {
 
         String key = LOGIN_2FA_NAMESPACE + admin.getUsername();
         String otp = otpService.generate(key);
-        emailService.sendOtpEmail(twoFactorEmail, "Admin Login Verification", otp, otpService.expiryMinutes());
-        String challengeToken = twoFactorTokenService.issue(admin.getUsername());
+        emailService.sendOtpEmail(admin.getEmail(), "Admin Login Verification", otp, otpService.expiryMinutes());        String challengeToken = twoFactorTokenService.issue(admin.getUsername());
         log.info("2FA OTP sent to IT Support inbox for admin login id={}", admin.getId());
 
         return AdminLoginResponse.challenge(
                 challengeToken,
-                "A verification code has been sent to " + maskEmail(twoFactorEmail) + ".",
-                maskEmail(twoFactorEmail),
+                "A verification code has been sent to " + maskEmail(admin.getEmail()),
+                maskEmail(admin.getEmail()),
                 otpService.expiryMinutes() * 60,
                 otpService.secondsUntilResendAllowed(key));
     }
@@ -137,8 +136,7 @@ public class AdminService {
 
         String key = LOGIN_2FA_NAMESPACE + admin.getUsername();
         String otp = otpService.generate(key);
-        emailService.sendOtpEmail(twoFactorEmail, "Admin Login Verification", otp, otpService.expiryMinutes());
-        log.info("2FA OTP resent to IT Support inbox for admin login id={}", admin.getId());
+        emailService.sendOtpEmail(admin.getEmail(), "Admin Login Verification", otp, otpService.expiryMinutes());        log.info("2FA OTP resent to IT Support inbox for admin login id={}", admin.getId());
 
         return new OtpRequestResponse(
                 "A new verification code has been sent to " + maskEmail(twoFactorEmail) + ".",
