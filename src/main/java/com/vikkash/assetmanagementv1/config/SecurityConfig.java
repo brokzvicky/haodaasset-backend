@@ -50,17 +50,6 @@ public class SecurityConfig {
                 // ── Public: login and password change (used during forced first-login) ──
                 .requestMatchers("/api/auth/**").permitAll()
 
-                // ── Public: eSSL/ZKTeco biometric device ADMS push protocol
-                //    (Attendance Management module). The physical device
-                //    firmware calls these URLs directly and cannot perform a
-                //    login handshake or send an Authorization header, so this
-                //    endpoint is intentionally unauthenticated — the same
-                //    trust model as the original standalone eSSL POC. In
-                //    production this is expected to be locked down at the
-                //    network layer instead (VPN / firewall allow-list to the
-                //    device's IP), not by an API key the firmware can't send. ──
-                .requestMatchers("/iclock/**").permitAll()
-
                 // ── Admin only ──
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 .requestMatchers("/assets/**").hasRole("ADMIN")

@@ -119,8 +119,6 @@ public class DataSeeder implements CommandLineRunner {
         {"ASSET_EMAIL_LOGS_VIEW",     "View asset email logs",          "Asset Email Logs"},
         {"SETTINGS_MANAGE",          "Manage system settings",         "Settings"},
         {"ACTIVITY_LOG_VIEW",         "View activity / audit log",      "Activity Log"},
-        {"ATTENDANCE_VIEW",           "View attendance records & devices", "Attendance"},
-        {"ATTENDANCE_MANAGE",         "Manage device-employee mappings & devices", "Attendance"},
     };
 
     private void seedPermissions() {
@@ -162,14 +160,14 @@ public class DataSeeder implements CommandLineRunner {
                         "NETWORK_CREDENTIALS_VIEW", "REPORTS_VIEW", "EMAIL_LOGS_VIEW"));
 
         createRoleIfMissing("HR_ADMIN", "HR Admin",
-                "Owns employee records, onboarding/offboarding, workforce reporting, and attendance.",
+                "Owns employee records, onboarding/offboarding, and workforce reporting.",
                 permissionsByCode("DASHBOARD_VIEW", "AI_SEARCH_USE", "EMPLOYEES_VIEW", "EMPLOYEES_WRITE",
-                        "REPORTS_VIEW", "ACTIVITY_LOG_VIEW", "ATTENDANCE_VIEW", "ATTENDANCE_MANAGE"));
+                        "REPORTS_VIEW", "ACTIVITY_LOG_VIEW"));
 
         createRoleIfMissing("SUPPORT_ENGINEER", "Support Engineer",
-                "Front-line IT support: asset lookup, maintenance, network credential lookup, and attendance device health.",
+                "Front-line IT support: asset lookup, maintenance, and network credential lookup.",
                 permissionsByCode("DASHBOARD_VIEW", "AI_SEARCH_USE", "ASSETS_VIEW", "MAINTENANCE_VIEW",
-                        "MAINTENANCE_MANAGE", "NETWORK_CREDENTIALS_VIEW", "SERVICE_BILLING_VIEW", "ATTENDANCE_VIEW"));
+                        "MAINTENANCE_MANAGE", "NETWORK_CREDENTIALS_VIEW", "SERVICE_BILLING_VIEW"));
 
         createRoleIfMissing("EMPLOYEE", "Employee",
                 "Standard employee self-service role (My Assets, My Files, Asset Requests).",
